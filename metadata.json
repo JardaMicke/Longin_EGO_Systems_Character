@@ -1,0 +1,8 @@
+{
+  "name": "CompanionAI - Private AI Sanctuary",
+  "description": "A high-end private AI companion platform with local LLM support, character creation, and image generation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
