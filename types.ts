@@ -4,6 +4,28 @@ export type ChatMode = 'conversation' | 'scenario';
 export type AppLanguage = 'cs' | 'en';
 export type VoiceEffect = 'none' | 'echo' | 'reverb' | 'radio' | 'robotic';
 
+export type InteractionRule = 'cooperative' | 'competitive' | 'independent';
+
+export interface Scenario {
+  id: string;
+  title: string;
+  description: string;
+  characterIds: string[];
+  userRole: string;
+  initialSituation: string;
+  lastUpdated: number;
+  duration?: number; // in minutes
+  interactionRule?: InteractionRule;
+}
+
+export interface ScenarioSession {
+  scenarioId: string;
+  messages: Message[];
+  isNarratorMode: boolean;
+}
+export type VoiceAccent = 'american' | 'british' | 'australian' | 'indian' | 'neutral';
+export type CharacterMood = 'happy' | 'sad' | 'energetic' | 'calm' | 'angry' | 'mysterious' | 'seductive';
+
 export interface BodySpecs {
   height: number;      // 140-200
   shoulders: number;   // 0-100
@@ -12,6 +34,10 @@ export interface BodySpecs {
   hips: number;        // 0-100
   legs: number;        // 0-100
   muscleTone: number;  // 0-100
+  neckLength: number;  // 0-100
+  calfSize: number;    // 0-100
+  armThickness: number; // 0-100
+  bellySize: number;   // 0-100
 }
 
 export interface FaceSpecs {
@@ -21,6 +47,9 @@ export interface FaceSpecs {
   lipsSize: number;
   jawline: number;
   forehead: number;
+  eyeTilt: number;
+  mouthWidth: number;
+  earSize: number;
 }
 
 export interface CharacterProfile {
@@ -40,6 +69,7 @@ export interface Character {
   avatar: string;
   description: string;
   personality: string;
+  mood?: CharacterMood;
   greeting: string;
   tags: string[];
   systemPrompt: string;
@@ -63,6 +93,7 @@ export interface Message {
   type: 'text' | 'image' | 'video' | 'narration';
   mode?: ChatMode;
   mimeType?: string;
+  tags?: string[];
 }
 
 export interface ChatSession {
@@ -80,13 +111,18 @@ export interface AppSettings {
   ollamaModel: string;
   lmStudioUrl: string;
   geminiModel: string;
+  nsfwModel: string; // Model to use when NSFW is enabled
   userName: string;
   isNsfwEnabled: boolean;
+  isAgeVerified: boolean;
+  stableDiffusionUrl: string; // For local image generation fallback
   voiceEnabled: boolean;
   voiceName: string;
   voiceSpeed: number;
   voicePitch: number;
   voiceEffect: VoiceEffect;
+  voiceAccent: VoiceAccent;
+  voiceAccentStrength: number;
 }
 
 export interface ImageGenerationParams {
@@ -97,6 +133,7 @@ export interface ImageGenerationParams {
   expression: string;
   dressType: string;
   props: string[];
+  tags: string[];
   isSequential: boolean;
   count: number;
   allAngles: boolean;

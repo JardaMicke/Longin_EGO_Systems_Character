@@ -1,36 +1,69 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Character, Message, ChatMode, AppLanguage } from '../types';
+import { Character, Message, ChatMode, AppLanguage, Scenario } from '../types';
 import { translations } from '../locales';
 
 interface ChatWindowProps {
   character: Character;
+  scenario?: Scenario;
   messages: Message[];
   currentMode: ChatMode;
+  isNarratorMode: boolean;
   language: AppLanguage;
   onSendMessage: (text: string, mode: ChatMode) => void;
   onSendImageRequest: () => void;
   onSendVideoRequest: () => void;
   onToggleMode: (mode: ChatMode) => void;
+  onToggleNarrator: () => void;
   isTyping: boolean;
   statusMessage?: string;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({ 
   character, 
+  scenario,
   messages, 
   currentMode,
+  isNarratorMode,
   language,
   onSendMessage,
   onSendImageRequest,
   onSendVideoRequest,
   onToggleMode,
+  onToggleNarrator,
   isTyping,
   statusMessage
 }) => {
   const [input, setInput] = useState('');
+  const [searchTag, setSearchTag] = useState('');
+  const [idleAnim, setIdleAnim] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = translations[language];
+
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    if (isTyping) {
+      setIdleAnim('');
+      return;
+    }
+
+    const triggerIdle = () => {
+      const currentMood = character.mood || 'happy';
+      
+      // 30% chance to trigger an idle animation
+      if (Math.random() > 0.7) {
+        setIdleAnim(`animate-idle-${currentMood}`);
+        // Keep it for 3-5 seconds
+        timeoutId = setTimeout(() => setIdleAnim(''), 3000 + Math.random() * 2000);
+      }
+    };
+
+    const interval = setInterval(triggerIdle, 8000 + Math.random() * 5000);
+    return () => {
+      clearInterval(interval);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isTyping, character.mood]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -53,21 +86,52 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       {/* Header */}
       <div className="h-20 border-b border-white/5 flex items-center px-8 gap-5 bg-black/40 backdrop-blur-xl z-10">
         <div className="relative group cursor-pointer">
-          <img src={character.avatar} alt={character.name} className="w-12 h-12 rounded-full object-cover ring-2 ring-pink-500/30 transition-all group-hover:ring-pink-500 shadow-xl" />
+          <img 
+            src={character.avatar} 
+            alt={character.name} 
+            className={`w-12 h-12 rounded-full object-cover ring-2 ring-pink-500/30 transition-all group-hover:ring-pink-500 shadow-xl ${idleAnim}`} 
+          />
           <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 border-2 border-black rounded-full"></div>
         </div>
-        <div className="flex-1">
-          <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-            {character.name}
-            {currentMode === 'scenario' && <span className="text-[10px] bg-violet-600/30 text-violet-400 px-2 py-0.5 rounded-md border border-violet-500/20 animate-pulse">{t.destiny_mode}</span>}
-          </h2>
-          <p className="text-[10px] uppercase font-black tracking-widest text-slate-500">
-            {statusMessage ? <span className="text-pink-500 animate-pulse">{statusMessage}</span> : t.active_sync}
-          </p>
+        <div className="flex-1 flex items-center gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              {character.name}
+              {currentMode === 'scenario' && <span className="text-[10px] bg-violet-600/30 text-violet-400 px-2 py-0.5 rounded-md border border-violet-500/20 animate-pulse">{t.destiny_mode}</span>}
+            </h2>
+            <p className="text-[10px] uppercase font-black tracking-widest text-slate-500">
+              {statusMessage ? <span className="text-pink-500 animate-pulse">{statusMessage}</span> : t.active_sync}
+            </p>
+          </div>
+
+          <div className="hidden md:flex items-center bg-white/5 border border-white/10 rounded-full px-3 py-1 gap-2 ml-4">
+            <svg className="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            <input 
+              type="text" 
+              placeholder="Filter by tag..." 
+              value={searchTag}
+              onChange={(e) => setSearchTag(e.target.value)}
+              className="bg-transparent border-none text-[10px] text-white focus:ring-0 outline-none w-24 placeholder:text-slate-600 font-bold uppercase tracking-widest"
+            />
+            {searchTag && (
+              <button onClick={() => setSearchTag('')} className="text-slate-500 hover:text-white">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Improved Toggle */}
         <div className="flex bg-black/40 rounded-2xl p-1 border border-white/10 shadow-inner">
+          {currentMode === 'scenario' && (
+            <button 
+              onClick={onToggleNarrator}
+              className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 mr-2 ${isNarratorMode ? 'bg-amber-600 text-white shadow-lg' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+              {isNarratorMode ? t.narrator : t.character}
+            </button>
+          )}
           <button 
             onClick={() => onToggleMode('conversation')}
             className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 ${currentMode === 'conversation' ? 'bg-pink-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
@@ -87,7 +151,32 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-10 scroll-smooth custom-scrollbar">
-        {messages.map((msg) => (
+        {scenario && messages.length === 0 && (
+          <div className="max-w-3xl mx-auto py-12 px-8 bg-violet-950/10 border border-violet-500/10 rounded-[3rem] text-center animate-in fade-in zoom-in duration-1000">
+            <div className="inline-block px-4 py-1 bg-violet-600 text-[10px] font-black text-white uppercase tracking-[0.3em] rounded-full mb-6 shadow-lg shadow-violet-900/40">
+              {t.scenario_start}
+            </div>
+            <h1 className="text-4xl font-black text-white mb-2 tracking-tight">{scenario.title}</h1>
+            <p className="text-slate-400 text-sm mb-8 max-w-xl mx-auto leading-relaxed">
+              {scenario.description}
+            </p>
+            
+            <div className="bg-black/20 rounded-3xl p-8 border border-white/5 mb-8">
+              <p className="text-[10px] uppercase font-black text-violet-500 tracking-[0.3em] mb-4">{t.initial_situation}</p>
+              <p className="text-violet-100 text-lg italic leading-relaxed">
+                "{scenario.initialSituation}"
+              </p>
+            </div>
+
+            <div className="flex justify-center gap-4">
+              <div className="px-10 py-4 bg-white/5 rounded-2xl border border-white/10 shadow-xl">
+                <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest mb-1">{t.your_role}</p>
+                <p className="text-white font-bold text-lg">{scenario.userRole}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        {messages.filter(m => !searchTag || (m.tags && m.tags.some(t => t.toLowerCase().includes(searchTag.toLowerCase())))).map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-500`}>
             {msg.type === 'narration' ? (
               <div className="w-full flex justify-center py-6">
@@ -105,8 +194,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   : 'bg-slate-900/40 backdrop-blur-md border border-white/5 text-slate-100 rounded-[2.5rem] rounded-tl-none px-8 py-5 shadow-xl'
               }`}>
                 {msg.type === 'image' && (
-                  <div className="rounded-2xl overflow-hidden mb-4 border border-white/10 group-hover:scale-[1.02] transition-transform duration-500">
+                  <div className="rounded-2xl overflow-hidden mb-4 border border-white/10 group-hover:scale-[1.02] transition-transform duration-500 relative">
                     <img src={msg.content} alt="moment" className="w-full h-auto object-cover max-h-[600px]" />
+                    {msg.tags && msg.tags.length > 0 && (
+                      <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
+                        {msg.tags.map(tag => (
+                          <span key={tag} className="px-2 py-0.5 bg-black/60 backdrop-blur-md text-[8px] font-black text-white uppercase tracking-widest rounded-md border border-white/10">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {msg.type === 'video' && (

@@ -8,18 +8,34 @@ interface ImageGenDialogProps {
   onClose: () => void;
   isNsfw: boolean;
   language: AppLanguage;
+  initialMood?: string;
 }
 
-export const ImageGenDialog: React.FC<ImageGenDialogProps> = ({ onConfirm, onClose, isNsfw, language }) => {
+export const ImageGenDialog: React.FC<ImageGenDialogProps> = ({ onConfirm, onClose, isNsfw, language, initialMood }) => {
   const t = translations[language];
+
+  const moodToExpression = (m?: string) => {
+    switch(m) {
+      case 'happy': return 'Happy';
+      case 'sad': return 'Serious';
+      case 'energetic': return 'Surprised';
+      case 'calm': return 'Shy';
+      case 'angry': return 'Angry';
+      case 'mysterious': return 'Serious';
+      case 'seductive': return 'Seductive';
+      default: return 'Happy';
+    }
+  };
+
   const [params, setParams] = useState<ImageGenerationParams>({
     aspectRatio: '1:1',
     quality: '1K',
     style: 'Photorealistic',
     pose: 'Standing',
-    expression: 'Happy',
+    expression: moodToExpression(initialMood),
     dressType: 'Casual',
     props: [],
+    tags: [],
     isSequential: false,
     count: 2,
     allAngles: false
@@ -30,6 +46,7 @@ export const ImageGenDialog: React.FC<ImageGenDialogProps> = ({ onConfirm, onClo
   const poses = ['Standing', 'Sitting', 'Lying down', 'Action pose', 'Bending over', 'Leaning', 'Kneeling'];
   const dressTypes = ['Casual', 'Formal', 'Lingerie', 'Bikini', 'Nude', 'Cosplay', 'Gym wear'];
   const nsfwProps = ['Bondage chair', 'Fucking machine', 'Dildo', 'Mouth plug', 'Bondage bench', 'Handcuffs'];
+  const commonTags = ['Portrait', 'Full Body', 'Close-up', 'Wide Shot', 'Outdoor', 'Indoor', 'Night', 'Day', 'Summer', 'Winter', 'Rainy', 'Sunny'];
 
   const toggleProp = (prop: string) => {
     setParams(prev => ({
@@ -37,6 +54,15 @@ export const ImageGenDialog: React.FC<ImageGenDialogProps> = ({ onConfirm, onClo
       props: prev.props.includes(prop) 
         ? prev.props.filter(p => p !== prop) 
         : [...prev.props, prop]
+    }));
+  };
+
+  const toggleTag = (tag: string) => {
+    setParams(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tag) 
+        ? prev.tags.filter(t => t !== tag) 
+        : [...prev.tags, tag]
     }));
   };
 
@@ -146,6 +172,22 @@ export const ImageGenDialog: React.FC<ImageGenDialogProps> = ({ onConfirm, onClo
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Tags Section */}
+          <div className="pt-8 border-t border-white/5">
+            <label className="text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em] mb-4 block">{t.image_tags}</label>
+            <div className="flex flex-wrap gap-2">
+              {commonTags.map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${params.tags.includes(tag) ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-white/5 border-white/5 text-slate-500 hover:text-slate-300'}`}
+                >
+                  {tag}
+                </button>
+              ))}
             </div>
           </div>
 

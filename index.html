@@ -44,6 +44,37 @@
             transition: filter 0.3s ease;
         }
 
+        /* Idle Animations */
+        @keyframes idle-bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-3px); }
+        }
+        @keyframes idle-sigh {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(0.97); opacity: 0.9; }
+        }
+        @keyframes idle-shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-1px); }
+            75% { transform: translateX(1px); }
+        }
+        @keyframes idle-sway {
+            0%, 100% { transform: rotate(0deg); }
+            50% { transform: rotate(2deg); }
+        }
+        @keyframes idle-pulse-fast {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .animate-idle-happy { animation: idle-bounce 2s ease-in-out infinite; }
+        .animate-idle-sad { animation: idle-sigh 4s ease-in-out infinite; }
+        .animate-idle-energetic { animation: idle-pulse-fast 1s ease-in-out infinite; }
+        .animate-idle-calm { animation: breathing 5s ease-in-out infinite; }
+        .animate-idle-angry { animation: idle-shake 0.5s ease-in-out infinite; }
+        .animate-idle-mysterious { animation: selected-glow 4s ease-in-out infinite; }
+        .animate-idle-seductive { animation: idle-sway 3s ease-in-out infinite; }
+
         /* Rich Text Backstory Styles */
         .backstory-content img {
             max-width: 100%;
@@ -83,8 +114,10 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
 <body>
     <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
 </body>
 </html>

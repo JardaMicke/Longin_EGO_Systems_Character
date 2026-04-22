@@ -13,9 +13,30 @@ interface ProfileViewProps {
 export const ProfileView: React.FC<ProfileViewProps> = ({ character, language, onClose, onStartChat }) => {
   const profile = character.profile;
   const t = translations[language];
+  const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 md:p-8 animate-in fade-in duration-300">
+      {/* Image Modal */}
+      {selectedImage && (
+        <div 
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-in fade-in zoom-in duration-300"
+          onClick={() => setSelectedImage(null)}
+        >
+          <img 
+            src={selectedImage} 
+            alt="Full size" 
+            className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl shadow-pink-500/20"
+          />
+          <button 
+            onClick={() => setSelectedImage(null)}
+            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
       <div className="bg-[#0c0c0e] w-full max-w-5xl h-full max-h-[90vh] rounded-[2.5rem] border border-white/10 shadow-[0_0_100px_rgba(219,39,119,0.1)] overflow-hidden flex flex-col md:flex-row relative">
         
         {/* Close Button Mobile */}
@@ -125,8 +146,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ character, language, o
               <h4 className="text-xs uppercase font-black text-slate-500 tracking-[0.2em]">{t.gallery}</h4>
               <div className="grid grid-cols-3 gap-4">
                 {profile.gallery.map((img, i) => (
-                  <div key={i} className="aspect-[3/4] rounded-2xl overflow-hidden border border-white/5 shadow-lg group">
-                    <img src={img} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 cursor-zoom-in" alt={`gallery-${i}`} />
+                  <div 
+                    key={i} 
+                    className="aspect-[3/4] rounded-2xl overflow-hidden border border-white/5 shadow-lg group cursor-zoom-in"
+                    onClick={() => setSelectedImage(img)}
+                  >
+                    <img src={img} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={`gallery-${i}`} />
                   </div>
                 ))}
               </div>

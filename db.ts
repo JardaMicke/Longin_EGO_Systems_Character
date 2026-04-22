@@ -1,10 +1,12 @@
 
-import { Character, ChatSession, AppSettings } from './types';
+import { Character, ChatSession, AppSettings, Scenario, ScenarioSession } from './types';
 
 const STORAGE_KEYS = {
   CHARACTERS: 'companion_characters',
   CHATS: 'companion_chats',
   SETTINGS: 'companion_settings',
+  SCENARIOS: 'companion_scenarios',
+  SCENARIO_CHATS: 'companion_scenario_chats',
 };
 
 const DEFAULT_CHARACTERS: Character[] = [
@@ -88,17 +90,38 @@ export const db = {
       ollamaModel: 'llama3:8b',
       lmStudioUrl: 'http://localhost:1234/v1',
       geminiModel: 'gemini-3-flash-preview',
+      nsfwModel: 'dolphin-llama3:8b', // Example uncensored model
       userName: 'User',
-      isNsfwEnabled: true,
+      isNsfwEnabled: false,
+      isAgeVerified: false,
+      stableDiffusionUrl: 'http://localhost:7860', // Default Automatic1111 port
       voiceEnabled: false,
       voiceName: 'Kore',
       voiceSpeed: 1.0,
       voicePitch: 1.0,
       voiceEffect: 'none',
+      voiceAccent: 'neutral',
+      voiceAccentStrength: 0.5,
     };
     return data ? { ...defaultSettings, ...JSON.parse(data) } : defaultSettings;
   },
   saveSettings: (settings: AppSettings) => {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  },
+  getScenarios: (): Scenario[] => {
+    const data = localStorage.getItem(STORAGE_KEYS.SCENARIOS);
+    return data ? JSON.parse(data) : [];
+  },
+  saveScenarios: (scenarios: Scenario[]) => {
+    localStorage.setItem(STORAGE_KEYS.SCENARIOS, JSON.stringify(scenarios));
+  },
+  getScenarioChats: (): Record<string, ScenarioSession> => {
+    const data = localStorage.getItem(STORAGE_KEYS.SCENARIO_CHATS);
+    return data ? JSON.parse(data) : {};
+  },
+  saveScenarioChat: (scenarioId: string, session: ScenarioSession) => {
+    const chats = db.getScenarioChats();
+    chats[scenarioId] = session;
+    localStorage.setItem(STORAGE_KEYS.SCENARIO_CHATS, JSON.stringify(chats));
   }
 };

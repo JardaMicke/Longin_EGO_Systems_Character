@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppSettings, LLMProvider, AppLanguage, VoiceEffect } from '../types';
+import { AppSettings, LLMProvider, AppLanguage, VoiceEffect, VoiceAccent } from '../types';
 import { translations } from '../locales';
 
 interface SettingsProps {
@@ -11,6 +11,7 @@ interface SettingsProps {
 
 export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose }) => {
   const [formData, setFormData] = React.useState<AppSettings>(settings);
+  const [showAgeVerification, setShowAgeVerification] = React.useState(false);
   const t = translations[formData.language];
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -18,7 +19,27 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
     onSave(formData);
   };
 
+  const handleNsfwToggle = (enabled: boolean) => {
+    if (enabled && !formData.isAgeVerified) {
+      setShowAgeVerification(true);
+    } else {
+      setFormData({ ...formData, isNsfwEnabled: enabled });
+    }
+  };
+
+  const confirmAge = () => {
+    setFormData({ ...formData, isNsfwEnabled: true, isAgeVerified: true });
+    setShowAgeVerification(false);
+  };
+
   const voices = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
+  const accents: { id: VoiceAccent; label: string }[] = [
+    { id: 'neutral', label: t.accent_neutral },
+    { id: 'american', label: t.accent_american },
+    { id: 'british', label: t.accent_british },
+    { id: 'australian', label: t.accent_australian },
+    { id: 'indian', label: t.accent_indian },
+  ];
   const effects: { id: VoiceEffect; label: string }[] = [
     { id: 'none', label: t.effect_none },
     { id: 'echo', label: t.effect_echo },
@@ -199,6 +220,41 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
                 </div>
 
                 <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2">{t.voice_accent}</label>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {accents.map(acc => (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        onClick={() => setFormData({...formData, voiceAccent: acc.id})}
+                        className={`py-2 rounded-lg text-[10px] font-bold transition-all border ${
+                          (formData.voiceAccent || 'neutral') === acc.id 
+                            ? 'bg-emerald-600 border-emerald-500 text-white' 
+                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+                        }`}
+                      >
+                        {acc.label}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {(formData.voiceAccent && formData.voiceAccent !== 'neutral') && (
+                    <div className="animate-in fade-in slide-in-from-top-2">
+                       <div className="flex justify-between items-center mb-1">
+                        <label className="text-[10px] font-bold uppercase text-slate-500">{t.accent_strength}</label>
+                        <span className="text-xs font-bold text-emerald-500">{formData.voiceAccentStrength || 1.0}x</span>
+                      </div>
+                      <input 
+                        type="range" min="0.1" max="2.0" step="0.1"
+                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                        value={formData.voiceAccentStrength || 1.0}
+                        onChange={e => setFormData({...formData, voiceAccentStrength: parseFloat(e.target.value)})}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2">{t.voice_effect}</label>
                   <div className="grid grid-cols-3 gap-2">
                     {effects.map(eff => (
@@ -232,11 +288,41 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
                   type="checkbox" 
                   className="sr-only peer"
                   checked={formData.isNsfwEnabled}
-                  onChange={e => setFormData({...formData, isNsfwEnabled: e.target.checked})}
+                  onChange={e => handleNsfwToggle(e.target.checked)}
                 />
                 <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-600"></div>
               </label>
             </div>
+            {formData.isNsfwEnabled && !formData.isAgeVerified && (
+              <p className="text-[10px] text-red-500 font-bold px-2">{t.age_required}</p>
+            )}
+
+            {formData.isNsfwEnabled && (
+              <div className="space-y-4 p-4 bg-slate-800/50 rounded-xl border border-pink-900/20 animate-in fade-in slide-in-from-top-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2">{t.nsfw_model}</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-pink-500 outline-none transition-colors"
+                    value={formData.nsfwModel}
+                    onChange={e => setFormData({...formData, nsfwModel: e.target.value})}
+                    placeholder="e.g. dolphin-llama3:8b"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">{t.nsfw_model_desc}</p>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2">{t.sd_url}</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-pink-500 outline-none transition-colors"
+                    value={formData.stableDiffusionUrl}
+                    onChange={e => setFormData({...formData, stableDiffusionUrl: e.target.value})}
+                    placeholder="http://localhost:7860"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">{t.sd_url_desc}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-4 flex gap-3">
@@ -255,6 +341,37 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
             </button>
           </div>
         </form>
+
+        {/* Age Verification Modal */}
+        {showAgeVerification && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md p-6">
+            <div className="bg-slate-900 border border-pink-500/30 rounded-3xl p-8 max-w-sm w-full text-center space-y-6 shadow-2xl shadow-pink-500/10">
+              <div className="w-16 h-16 bg-pink-600/20 rounded-full flex items-center justify-center text-pink-500 mx-auto">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-white">{t.age_verification_title}</h3>
+                <p className="text-sm text-slate-400 leading-relaxed">{t.age_verification_desc}</p>
+              </div>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={confirmAge}
+                  className="w-full bg-pink-600 hover:bg-pink-500 py-3 rounded-xl font-bold text-white transition-all shadow-lg shadow-pink-900/20"
+                >
+                  {t.confirm_age}
+                </button>
+                <button 
+                  onClick={() => setShowAgeVerification(false)}
+                  className="w-full bg-slate-800 hover:bg-slate-700 py-3 rounded-xl font-bold text-slate-400 transition-all"
+                >
+                  {t.cancel}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
