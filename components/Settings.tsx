@@ -32,6 +32,65 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
     setShowAgeVerification(false);
   };
 
+  const handleDownloadInstaller = () => {
+    const batContent = `
+@echo off
+setlocal
+
+echo Zvolte slozku pro instalaci (otevre se dialogove okno)...
+set "psCommand=\"(new-object -COM 'Shell.Application').BrowseForFolder(0,'Vyberte slozku pro instalaci',0,0).self.path\""
+for /f "delims=" %%I in ('powershell %psCommand%') do set "INSTALL_DIR=%%I"
+
+if "%INSTALL_DIR%"=="" (
+    echo Nebyla vybrana zadna slozka, instalace ukoncena.
+    pause
+    exit /b
+)
+
+set "TARGET_DIR=%INSTALL_DIR%\\CompanionAI_Backend"
+
+echo ==============================================
+echo Companion AI Local Backend Installer (Windows)
+echo ==============================================
+echo.
+echo Tento skript pripravi slozku %TARGET_DIR%
+echo a stahne:
+echo 1) Pinokio (AI Prohlizec pro jednoduse stahovane AI apps)
+echo 2) ComfyUI (Pro generovani medii)
+echo 3) Ollama (Pro lokalni jazykove modely)
+echo.
+pause
+echo.
+
+if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%"
+cd /d "%TARGET_DIR%"
+
+echo [1/3] Stahuji Pinokio... (Pinokio umi samo nainstalovat ComfyUI i s workflows)
+curl -L -o pinokio_installer.exe "https://github.com/pinokiocomputer/pinokio/releases/latest/download/Pinokio-Setup.exe"
+
+echo [2/3] Stahuji Ollama v2...
+curl -L -o OllamaSetup.exe "https://ollama.com/download/OllamaSetup.exe"
+
+echo ==============================================
+echo ZAKLAD STAZEN do %TARGET_DIR%\
+echo.
+echo DALSIM KROKEM JE:
+echo 1) Spustit OllamaSetup.exe a nainstalovat si Llama3 nebo jiny model (ollama run llama3)
+echo 2) Spustit pinokio_installer.exe, nechat ho nainstalovat se do vasi slozky a z nej si na 1 kliknuti pridat ComfyUI.
+echo 3) Az ComfyUI a Ollama pobezi, staci do \"Nastaveni\" v 
+echo teto aplikaci zadat url k Ollama a url k ComfyUI.
+echo ==============================================
+pause
+`;
+    const blob = new Blob([batContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'companion_backend_install.bat';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const voices = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
   const accents: { id: VoiceAccent; label: string }[] = [
     { id: 'neutral', label: t.accent_neutral },
@@ -149,6 +208,22 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
                     onChange={e => setFormData({...formData, lmStudioUrl: e.target.value})}
                   />
               )}
+            </div>
+
+            <div className="mt-4 p-4 bg-emerald-900/10 rounded-xl border border-emerald-900/30">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-semibold text-emerald-400">{(t as any).local_backend}</h4>
+                  <p className="text-xs text-slate-400 mt-1">{(t as any).installer_desc}</p>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={handleDownloadInstaller}
+                  className="whitespace-nowrap px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-bold text-white transition-all shadow-lg shadow-emerald-900/20"
+                >
+                  {(t as any).download_installer}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -320,6 +395,17 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose })
                     placeholder="http://localhost:7860"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">{t.sd_url_desc}</p>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2">{t.comfy_url}</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-pink-500 outline-none transition-colors"
+                    value={formData.comfyUIUrl}
+                    onChange={e => setFormData({...formData, comfyUIUrl: e.target.value})}
+                    placeholder="http://127.0.0.1:8188"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">{t.comfy_url_desc}</p>
                 </div>
               </div>
             )}

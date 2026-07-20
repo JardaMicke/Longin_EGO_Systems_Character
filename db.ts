@@ -1,5 +1,6 @@
 
 import { Character, ChatSession, AppSettings, Scenario, ScenarioSession } from './types';
+import localforage from 'localforage';
 
 const STORAGE_KEYS = {
   CHARACTERS: 'companion_characters',
@@ -62,66 +63,98 @@ const DEFAULT_CHARACTERS: Character[] = [
   }
 ];
 
+export const defaultSettings: AppSettings = {
+  language: 'cs',
+  provider: 'gemini',
+  openaiKey: '',
+  openaiModel: 'gpt-4o',
+  ollamaUrl: 'http://localhost:11434',
+  ollamaModel: 'llama3:8b',
+  lmStudioUrl: 'http://localhost:1234/v1',
+  geminiModel: 'gemini-3.5-flash',
+  nsfwModel: 'dolphin-llama3:8b', // Example uncensored model
+  userName: 'User',
+  isNsfwEnabled: false,
+  isAgeVerified: false,
+  stableDiffusionUrl: 'http://localhost:7860', // Default Automatic1111 port
+  comfyUIUrl: 'http://localhost:8188', // Default ComfyUI port
+  voiceEnabled: false,
+  voiceName: 'Kore',
+  voiceSpeed: 1.0,
+  voicePitch: 1.0,
+  voiceEffect: 'none',
+  voiceAccent: 'neutral',
+  voiceAccentStrength: 0.5,
+};
+
 export const db = {
-  getCharacters: (): Character[] => {
-    const data = localStorage.getItem(STORAGE_KEYS.CHARACTERS);
-    return data ? JSON.parse(data) : DEFAULT_CHARACTERS;
+  getCharacters: async (): Promise<Character[]> => {
+    try {
+      const data = await localforage.getItem<Character[]>(STORAGE_KEYS.CHARACTERS);
+      return data ? data : DEFAULT_CHARACTERS;
+    } catch {
+      return DEFAULT_CHARACTERS;
+    }
   },
-  saveCharacters: (chars: Character[]) => {
-    localStorage.setItem(STORAGE_KEYS.CHARACTERS, JSON.stringify(chars));
+  saveCharacters: async (chars: Character[]) => {
+    await localforage.setItem(STORAGE_KEYS.CHARACTERS, chars);
   },
-  getChats: (): Record<string, ChatSession> => {
-    const data = localStorage.getItem(STORAGE_KEYS.CHATS);
-    return data ? JSON.parse(data) : {};
+  getChats: async (): Promise<Record<string, ChatSession>> => {
+    try {
+      const data = await localforage.getItem<Record<string, ChatSession>>(STORAGE_KEYS.CHATS);
+      return data || {};
+    } catch {
+      return {};
+    }
   },
-  saveChat: (characterId: string, session: ChatSession) => {
-    const chats = db.getChats();
+  saveChat: async (characterId: string, session: ChatSession) => {
+    const chats = await db.getChats();
     chats[characterId] = session;
-    localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(chats));
+    await localforage.setItem(STORAGE_KEYS.CHATS, chats);
   },
-  getSettings: (): AppSettings => {
-    const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    const defaultSettings: AppSettings = {
-      language: 'cs',
-      provider: 'gemini',
-      openaiKey: '',
-      openaiModel: 'gpt-4o',
-      ollamaUrl: 'http://localhost:11434',
-      ollamaModel: 'llama3:8b',
-      lmStudioUrl: 'http://localhost:1234/v1',
-      geminiModel: 'gemini-3-flash-preview',
-      nsfwModel: 'dolphin-llama3:8b', // Example uncensored model
-      userName: 'User',
-      isNsfwEnabled: false,
-      isAgeVerified: false,
-      stableDiffusionUrl: 'http://localhost:7860', // Default Automatic1111 port
-      voiceEnabled: false,
-      voiceName: 'Kore',
-      voiceSpeed: 1.0,
-      voicePitch: 1.0,
-      voiceEffect: 'none',
-      voiceAccent: 'neutral',
-      voiceAccentStrength: 0.5,
-    };
-    return data ? { ...defaultSettings, ...JSON.parse(data) } : defaultSettings;
+  getSettings: async (): Promise<AppSettings> => {
+    try {
+      const data = await localforage.getItem<AppSettings>(STORAGE_KEYS.SETTINGS);
+      if (data) {
+        // Sanitize legacy or invalid gemini models
+        if (data.geminiModel && data.geminiModel.includes('gemini-3-flash-preview')) {
+          data.geminiModel = 'gemini-3.5-flash';
+        }
+        if (data.geminiModel && data.geminiModel.includes('gemini-2.5-flash-latest')) {
+          data.geminiModel = 'gemini-3.5-flash';
+        }
+        return { ...defaultSettings, ...data };
+      }
+      return defaultSettings;
+    } catch {
+      return defaultSettings;
+    }
   },
-  saveSettings: (settings: AppSettings) => {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  saveSettings: async (settings: AppSettings) => {
+    await localforage.setItem(STORAGE_KEYS.SETTINGS, settings);
   },
-  getScenarios: (): Scenario[] => {
-    const data = localStorage.getItem(STORAGE_KEYS.SCENARIOS);
-    return data ? JSON.parse(data) : [];
+  getScenarios: async (): Promise<Scenario[]> => {
+    try {
+      const data = await localforage.getItem<Scenario[]>(STORAGE_KEYS.SCENARIOS);
+      return data || [];
+    } catch {
+      return [];
+    }
   },
-  saveScenarios: (scenarios: Scenario[]) => {
-    localStorage.setItem(STORAGE_KEYS.SCENARIOS, JSON.stringify(scenarios));
+  saveScenarios: async (scenarios: Scenario[]) => {
+    await localforage.setItem(STORAGE_KEYS.SCENARIOS, scenarios);
   },
-  getScenarioChats: (): Record<string, ScenarioSession> => {
-    const data = localStorage.getItem(STORAGE_KEYS.SCENARIO_CHATS);
-    return data ? JSON.parse(data) : {};
+  getScenarioChats: async (): Promise<Record<string, ScenarioSession>> => {
+    try {
+      const data = await localforage.getItem<Record<string, ScenarioSession>>(STORAGE_KEYS.SCENARIO_CHATS);
+      return data || {};
+    } catch {
+      return {};
+    }
   },
-  saveScenarioChat: (scenarioId: string, session: ScenarioSession) => {
-    const chats = db.getScenarioChats();
+  saveScenarioChat: async (scenarioId: string, session: ScenarioSession) => {
+    const chats = await db.getScenarioChats();
     chats[scenarioId] = session;
-    localStorage.setItem(STORAGE_KEYS.SCENARIO_CHATS, JSON.stringify(chats));
+    await localforage.setItem(STORAGE_KEYS.SCENARIO_CHATS, chats);
   }
 };

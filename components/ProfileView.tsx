@@ -1,39 +1,128 @@
 
-import React from 'react';
-import { Character, AppLanguage } from '../types';
+import React, { useState } from 'react';
+import { Character, AppLanguage, AppSettings, ImageGenerationParams } from '../types';
 import { translations } from '../locales';
+import { generateImage } from '../llmService';
 
 interface ProfileViewProps {
   character: Character;
   language: AppLanguage;
+  settings: AppSettings;
   onClose: () => void;
   onStartChat: (id: string) => void;
+  onUpdateCharacter?: (char: Character) => void;
 }
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ character, language, onClose, onStartChat }) => {
+export const ProfileView: React.FC<ProfileViewProps> = ({ character, language, settings, onClose, onStartChat, onUpdateCharacter }) => {
   const profile = character.profile;
   const t = translations[language];
-  const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
+  const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  const images = profile?.gallery || [];
+
+  const handlePrev = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedImageIndex(prev => prev !== null ? (prev > 0 ? prev - 1 : images.length - 1) : null);
+  };
+
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedImageIndex(prev => prev !== null ? (prev < images.length - 1 ? prev + 1 : 0) : null);
+  };
+
+  const handleGenerateGallery = async () => {
+    if(!onUpdateCharacter) return;
+    setIsGenerating(true);
+    try {
+      const newImages: string[] = [];
+      const poses = [
+        "A full body shot showing their usual posture and outfit in natural lighting.",
+        "A dynamic mid-shot looking confident or relaxed in their typical setting.",
+        "A close-up portrait showcasing their facial features and expression.",
+        "A candid moment, looking away from the camera, immersed in their thoughts."
+      ];
+
+      // Since generateImage uses the provided ImageGenerationParams, we can just call it in parallel or sequential
+      for (const pose of poses) {
+        const params: ImageGenerationParams = {
+          aspectRatio: '3:4',
+          quality: '1K',
+          style: 'Photorealistic',
+          pose: pose,
+          expression: character.mood === 'happy' ? 'Happy' : 'Serious',
+          dressType: 'Casual',
+          props: [],
+          tags: [],
+          isSequential: false,
+          count: 1,
+          allAngles: false
+        };
+        const res = await generateImage(character, params, settings);
+        if (res && res.length > 0) {
+           newImages.push(...res);
+        }
+      }
+
+      if (newImages.length > 0) {
+        const updatedChar = { ...character };
+        if(!updatedChar.profile) {
+          // Keep other properties
+        }
+        updatedChar.profile = { 
+          ...character.profile,
+          gallery: [...(updatedChar.profile?.gallery || []), ...newImages] 
+        };
+        onUpdateCharacter(updatedChar);
+      }
+    } catch(e) {
+      console.error(e);
+    }
+    setIsGenerating(false);
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 md:p-8 animate-in fade-in duration-300">
       {/* Image Modal */}
-      {selectedImage && (
+      {selectedImageIndex !== null && (
         <div 
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-in fade-in zoom-in duration-300"
-          onClick={() => setSelectedImage(null)}
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-in fade-in zoom-in duration-300 select-none group"
+          onClick={() => setSelectedImageIndex(null)}
         >
           <img 
-            src={selectedImage} 
-            alt="Full size" 
+            src={images[selectedImageIndex] || undefined} 
+            alt={`Full size ${selectedImageIndex + 1}`} 
             className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl shadow-pink-500/20"
           />
+          
           <button 
-            onClick={() => setSelectedImage(null)}
-            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all"
+            onClick={() => setSelectedImageIndex(null)}
+            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all z-50"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
+
+          {images.length > 1 && (
+            <>
+              <div className="absolute top-8 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/50 backdrop-blur-md rounded-full text-white text-xs font-bold tracking-widest z-50">
+                {selectedImageIndex + 1} / {images.length}
+              </div>
+              
+              <button 
+                onClick={handlePrev}
+                className="absolute left-6 md:left-12 p-4 bg-white/5 hover:bg-white/20 hover:scale-110 rounded-full text-white transition-all z-50 focus:outline-none"
+              >
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              </button>
+              
+              <button 
+                onClick={handleNext}
+                className="absolute right-6 md:right-12 p-4 bg-white/5 hover:bg-white/20 hover:scale-110 rounded-full text-white transition-all z-50 focus:outline-none"
+              >
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -47,7 +136,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ character, language, o
         {/* Left: Main Image */}
         <div className="w-full md:w-[40%] h-64 md:h-full relative overflow-hidden group flex-shrink-0">
           <img 
-            src={character.avatar} 
+            src={character.avatar || undefined} 
             alt={character.name} 
             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
           />
@@ -141,22 +230,42 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ character, language, o
           </div>
 
           {/* Gallery */}
-          {profile?.gallery && profile.gallery.length > 0 && (
-            <div className="space-y-4">
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
               <h4 className="text-xs uppercase font-black text-slate-500 tracking-[0.2em]">{t.gallery}</h4>
-              <div className="grid grid-cols-3 gap-4">
-                {profile.gallery.map((img, i) => (
+              <button 
+                onClick={handleGenerateGallery}
+                disabled={isGenerating}
+                className="text-xs px-4 py-2 bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 font-bold uppercase tracking-widest rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-pink-400 border-t-transparent rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>+ Generate Samples</>
+                )}
+              </button>
+            </div>
+            {images.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {images.map((img, i) => (
                   <div 
                     key={i} 
                     className="aspect-[3/4] rounded-2xl overflow-hidden border border-white/5 shadow-lg group cursor-zoom-in"
-                    onClick={() => setSelectedImage(img)}
+                    onClick={() => setSelectedImageIndex(i)}
                   >
-                    <img src={img} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={`gallery-${i}`} />
+                    <img src={img || undefined} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={`gallery-${i}`} />
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="flex flex-col items-center justify-center p-8 bg-white/5 border border-dashed border-white/10 rounded-2xl">
+                <p className="text-slate-500 text-sm font-medium">No images in gallery yet.</p>
+              </div>
+            )}
+          </div>
 
           {/* Action Buttons */}
           <div className="pt-8 flex gap-4 sticky bottom-0 bg-[#0c0c0e]/80 backdrop-blur-md pb-4">

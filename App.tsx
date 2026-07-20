@@ -9,7 +9,7 @@ import { ProfileView } from './components/ProfileView';
 import { ImageGenDialog } from './components/ImageGenDialog';
 import { VideoGenDialog } from './components/VideoGenDialog';
 import { Character, ChatSession, Message, AppSettings, ImageGenerationParams, VideoGenerationParams, ChatMode, Scenario, ScenarioSession } from './types';
-import { db } from './db';
+import { db, defaultSettings } from './db';
 import { callLLM, callScenarioLLM, generateImage, generateVideo, playVoice } from './llmService';
 import { translations } from './locales';
 
@@ -23,7 +23,8 @@ const App: React.FC = () => {
   const [showVideoGen, setShowVideoGen] = useState(false);
   const [chats, setChats] = useState<Record<string, ChatSession>>({});
   const [scenarioChats, setScenarioChats] = useState<Record<string, ScenarioSession>>({});
-  const [settings, setSettings] = useState<AppSettings>(db.getSettings());
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | undefined>();
   const [currentMode, setCurrentMode] = useState<ChatMode>('conversation');
@@ -32,23 +33,64 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showCreator, setShowCreator] = useState(false);
   const [showScenarioCreator, setShowScenarioCreator] = useState(false);
+  const [editingScenario, setEditingScenario] = useState<Scenario | undefined>(undefined);
 
   const t = translations[settings.language];
 
   useEffect(() => {
-    setCharacters(db.getCharacters());
-    setScenarios(db.getScenarios());
-    const savedChats = db.getChats();
-    const normalizedChats: Record<string, ChatSession> = {};
-    Object.keys(savedChats).forEach(id => {
-      normalizedChats[id] = { 
-        ...savedChats[id], 
-        currentMode: savedChats[id].currentMode || 'conversation' 
-      };
-    });
-    setChats(normalizedChats);
-    setScenarioChats(db.getScenarioChats());
+    const loadData = async () => {
+      setSettings(await db.getSettings());
+      const chars = await db.getCharacters();
+      setCharacters(chars);
+      setScenarios(await db.getScenarios());
+      
+      const savedChats = await db.getChats();
+      const normalizedChats: Record<string, ChatSession> = {};
+      Object.keys(savedChats).forEach(id => {
+        normalizedChats[id] = { 
+          ...savedChats[id], 
+          currentMode: savedChats[id].currentMode || 'conversation' 
+        };
+      });
+      setChats(normalizedChats);
+      
+      const sChats = await db.getScenarioChats();
+      setScenarioChats(sChats);
+
+      // Restore active session
+      const lastScenarioId = localStorage.getItem('companion_active_scenario_id');
+      const lastCharId = localStorage.getItem('companion_active_char_id');
+      const lastMode = localStorage.getItem('companion_active_mode') as ChatMode;
+      const lastNarratorMode = localStorage.getItem('companion_active_narrator_mode') === 'true';
+
+      if (lastScenarioId && sChats[lastScenarioId]) {
+        setSelectedScenarioId(lastScenarioId);
+        setCurrentMode('scenario');
+        setIsNarratorMode(lastNarratorMode);
+      } else if (lastCharId && normalizedChats[lastCharId]) {
+        setSelectedId(lastCharId);
+        setCurrentMode(lastMode || normalizedChats[lastCharId]?.currentMode || 'conversation');
+      }
+      setIsLoadingData(false);
+    };
+    loadData();
   }, []);
+
+  // Save active session state whenever it changes
+  useEffect(() => {
+    if (selectedScenarioId) {
+      localStorage.setItem('companion_active_scenario_id', selectedScenarioId);
+      localStorage.setItem('companion_active_narrator_mode', isNarratorMode.toString());
+      localStorage.removeItem('companion_active_char_id');
+    } else if (selectedId) {
+      localStorage.setItem('companion_active_char_id', selectedId);
+      localStorage.setItem('companion_active_mode', currentMode);
+      localStorage.removeItem('companion_active_scenario_id');
+    } else {
+      localStorage.removeItem('companion_active_scenario_id');
+      localStorage.removeItem('companion_active_char_id');
+    }
+  }, [selectedId, selectedScenarioId, currentMode, isNarratorMode]);
 
   const moodToExpression = (m?: string) => {
     switch(m) {
@@ -82,7 +124,7 @@ const App: React.FC = () => {
       mode: mode
     };
 
-    const updatedMessages = [...session.messages, userMsg];
+    const updatedMessages = [...(session.messages || []), userMsg];
     const updatedSession = { ...session, messages: updatedMessages, currentMode: mode };
     
     setChats(prev => ({ ...prev, [selectedId]: updatedSession }));
@@ -146,7 +188,7 @@ const App: React.FC = () => {
                 timestamp: Date.now(),
                 type: 'video'
               }));
-              const updatedSession = { ...session, messages: [...session.messages, ...videoMessages] };
+              const updatedSession = { ...session, messages: [...(session.messages || []), ...videoMessages] };
               setChats(prev => ({ ...prev, [selectedId]: updatedSession }));
               db.saveChat(selectedId, updatedSession);
             });
@@ -176,7 +218,7 @@ const App: React.FC = () => {
       mode: 'scenario'
     };
 
-    const updatedMessages = [...session.messages, userMsg];
+    const updatedMessages = [...(session.messages || []), userMsg];
     const updatedSession = { ...session, messages: updatedMessages, isNarratorMode };
     
     setScenarioChats(prev => ({ ...prev, [selectedScenarioId]: updatedSession }));
@@ -237,7 +279,7 @@ const App: React.FC = () => {
         type: 'image',
         tags: params.tags
       }));
-      const updatedSession = { ...session, messages: [...session.messages, ...newMessages] };
+      const updatedSession = { ...session, messages: [...(session.messages || []), ...newMessages] };
       setChats(prev => ({ ...prev, [selectedId]: updatedSession }));
       db.saveChat(selectedId, updatedSession);
     } catch (error) {
@@ -266,7 +308,7 @@ const App: React.FC = () => {
         timestamp: Date.now(),
         type: 'video'
       }));
-      const updatedSession = { ...session, messages: [...session.messages, ...videoMessages] };
+      const updatedSession = { ...session, messages: [...(session.messages || []), ...videoMessages] };
       setChats(prev => ({ ...prev, [selectedId]: updatedSession }));
       db.saveChat(selectedId, updatedSession);
     } catch (error) {
@@ -291,6 +333,12 @@ const App: React.FC = () => {
     setSelectedId(newChar.id);
   };
 
+  const handleUpdateCharacter = (updatedChar: Character) => {
+    const updated = characters.map(c => c.id === updatedChar.id ? updatedChar : c);
+    setCharacters(updated);
+    db.saveCharacters(updated);
+  };
+
   const handleDeleteCharacter = (id: string) => {
     const updatedChars = characters.filter(c => c.id !== id);
     setCharacters(updatedChars);
@@ -307,10 +355,16 @@ const App: React.FC = () => {
   };
 
   const handleCreateScenario = (newScenario: Scenario) => {
-    const updated = [...scenarios, newScenario];
+    let updated;
+    if (scenarios.some(s => s.id === newScenario.id)) {
+      updated = scenarios.map(s => s.id === newScenario.id ? newScenario : s);
+    } else {
+      updated = [...scenarios, newScenario];
+    }
     setScenarios(updated);
     db.saveScenarios(updated);
     setShowScenarioCreator(false);
+    setEditingScenario(undefined);
     setSelectedScenarioId(newScenario.id);
     setSelectedId(null);
   };
@@ -375,6 +429,10 @@ const App: React.FC = () => {
         onOpenScenarioCreator={() => setShowScenarioCreator(true)}
         onDeleteCharacter={handleDeleteCharacter}
         onDeleteScenario={handleDeleteScenario}
+        onEditScenario={(scenario) => {
+          setEditingScenario(scenario);
+          setShowScenarioCreator(true);
+        }}
       />
       
       {selectedChar || selectedScenario ? (
@@ -428,7 +486,11 @@ const App: React.FC = () => {
           characters={characters}
           language={settings.language}
           onSave={handleCreateScenario}
-          onClose={() => setShowScenarioCreator(false)}
+          initialScenario={editingScenario}
+          onClose={() => {
+            setShowScenarioCreator(false);
+            setEditingScenario(undefined);
+          }}
         />
       )}
 
@@ -455,11 +517,13 @@ const App: React.FC = () => {
         <ProfileView 
           character={profileChar}
           language={settings.language}
+          settings={settings}
           onClose={() => setViewingProfileId(null)}
           onStartChat={(id) => {
             setSelectedId(id);
             setViewingProfileId(null);
           }}
+          onUpdateCharacter={handleUpdateCharacter}
         />
       )}
     </div>

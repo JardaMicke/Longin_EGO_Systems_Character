@@ -29,51 +29,173 @@ const getDynamicNSFWBoost = (character: Character, settings: AppSettings) => {
   return "high-fidelity anatomical detail, physical manifestations of extreme emotion, perspiration, realistic skin deformation under pressure, cinematic shadow and light on body surfaces.";
 };
 
-const callLocalLLM = async (settings: AppSettings, prompt: string, systemPrompt: string): Promise<string> => {
-  // Try LM Studio first if configured, then Ollama
-  if (settings.lmStudioUrl) {
-    try {
-      const resp = await fetch(`${settings.lmStudioUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: settings.isNsfwEnabled ? settings.nsfwModel : settings.openaiModel,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.7,
-        }),
-      });
-      const json = await resp.json();
-      return json.choices?.[0]?.message?.content || "";
-    } catch (e) {
-      console.warn("LM Studio failed, trying Ollama...");
+const localTools = [
+  {
+    type: "function",
+    function: {
+      name: "generate_image",
+      description: "Generates a photo or image of the character based on requested style and pose.",
+      parameters: {
+        type: "object",
+        properties: {
+          style: { type: "string" },
+          pose: { type: "string" },
+          expression: { type: "string" },
+          dress_type: { type: "string" },
+          quality: { type: "string" },
+          tags: { type: "array", items: { type: "string" } }
+        },
+        required: ["style", "pose", "expression", "dress_type"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_video",
+      description: "Generates a short video clip of the character.",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          aspectRatio: { type: "string" },
+          resolution: { type: "string" }
+        },
+        required: ["prompt", "aspectRatio", "resolution"]
+      }
     }
   }
+];
 
-  if (settings.ollamaUrl) {
-    try {
-      const resp = await fetch(`${settings.ollamaUrl}/api/generate`, {
-        method: 'POST',
-        body: JSON.stringify({
-          model: settings.isNsfwEnabled ? settings.nsfwModel : settings.ollamaModel,
-          system: systemPrompt,
-          prompt: prompt,
-          stream: false
-        }),
-      });
+const callLocalLLM = async (
+  settings: AppSettings, 
+  history: Message[], 
+  systemPrompt: string,
+  onProgress?: (text: string) => void
+): Promise<{ text: string; toolCalls?: any[] }> => {
+  const isLmStudio = !!settings.lmStudioUrl;
+  const baseUrl = settings.lmStudioUrl || (settings.ollamaUrl ? `${settings.ollamaUrl}/v1` : '');
+  
+  if (!baseUrl) return { text: "" };
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history.map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }))
+  ];
+
+  try {
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: settings.isNsfwEnabled ? settings.nsfwModel : (isLmStudio ? settings.openaiModel : settings.ollamaModel),
+        messages,
+        temperature: 0.7,
+        tools: localTools,
+        tool_choice: "auto",
+        stream: !!onProgress
+      }),
+    });
+
+    if (onProgress && resp.body) {
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line.trim() !== 'data: [DONE]') {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.choices?.[0]?.delta?.content) {
+                fullText += data.choices[0].delta.content;
+                onProgress(fullText);
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      return { text: fullText };
+    } else {
       const json = await resp.json();
-      return json.response || "";
-    } catch (e) {
-      console.warn("Ollama failed.");
-    }
-  }
+      const message = json.choices?.[0]?.message;
+      let toolCalls: any[] | undefined = undefined;
+      
+      if (message?.tool_calls?.length > 0) {
+        toolCalls = message.tool_calls.map((tc: any) => ({
+          name: tc.function.name,
+          args: typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments
+        }));
+      }
 
-  return "";
+      return { 
+        text: message?.content || "", 
+        toolCalls 
+      };
+    }
+  } catch (e) {
+    console.error("Local LLM failed:", e);
+    return { text: "" };
+  }
 };
 
 const generateLocalImage = async (prompt: string, settings: AppSettings): Promise<string[]> => {
+  // If ComfyUI is defined, prioritize it for image generation
+  if (settings.comfyUIUrl) {
+    try {
+      // NOTE: This uses a simplified fallback workflow.
+      // For real ComfyUI usage, users should inject their specific workflow JSON.
+      const workflow = {
+        "3": { "class_type": "KSampler", "inputs": { "seed": Math.floor(Math.random() * 10000000), "steps": 20, "cfg": 7, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
+        "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" } },
+        "5": { "class_type": "EmptyLatentImage", "inputs": { "batch_size": 1, "width": 512, "height": 768 } },
+        "6": { "class_type": "CLIPTextEncode", "inputs": { "text": prompt, "clip": ["4", 1] } },
+        "7": { "class_type": "CLIPTextEncode", "inputs": { "text": "deformed, blurry, bad anatomy", "clip": ["4", 1] } },
+        "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
+        "9": { "class_type": "SaveImage", "inputs": { "filename_prefix": "ComfyUI", "images": ["8", 0] } }
+      };
+
+      const resp = await fetch(`${settings.comfyUIUrl}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: workflow }),
+      });
+      const data = await resp.json();
+      const promptId = data.prompt_id;
+
+      // Poll history for completion
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const histResp = await fetch(`${settings.comfyUIUrl}/history/${promptId}`);
+        const histData = await histResp.json();
+        if (histData[promptId]) {
+          const outputs = histData[promptId].outputs;
+          for (const key in outputs) {
+            if (outputs[key].images && outputs[key].images.length > 0) {
+              const fileInfo = outputs[key].images[0];
+              // Try to fetch the image data as base64 to display
+              const imageResp = await fetch(`${settings.comfyUIUrl}/view?filename=${fileInfo.filename}&subfolder=${fileInfo.subfolder}&type=${fileInfo.type}`);
+              const blob = await imageResp.blob();
+              return [URL.createObjectURL(blob)];
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("ComfyUI Image Gen failed, falling back to A1111:", e);
+    }
+  }
+
+  // Fallback to Automatic1111
   if (!settings.stableDiffusionUrl) return [];
   try {
     const resp = await fetch(`${settings.stableDiffusionUrl}/sdapi/v1/txt2img`, {
@@ -97,6 +219,7 @@ const generateLocalImage = async (prompt: string, settings: AppSettings): Promis
   }
   return [];
 };
+
 
 /**
  * Nástroje pro LLM (Function Calling)
@@ -136,23 +259,27 @@ const videoTool: FunctionDeclaration = {
  * AI-powered prompt refiner for character creation.
  */
 export const refineSystemPrompt = async (character: Partial<Character>, settings: AppSettings): Promise<string> => {
+  const stripHtml = (html: string) => html ? html.replace(/<[^>]*>?/gm, '') : '';
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const prompt = `
     Task: Write a highly detailed, professional-grade System Instruction for an AI Companion based on the following raw data.
-    Character Name: ${character.name}
-    Role: ${character.description}
-    Personality: ${character.personality}
-    Quirks: ${character.personalityQuirks?.join(', ')}
-    Backstory: ${character.backstory}
-    Visual Traits: ${character.visualTraits}
+    Organize the output into clear sections: IDENTITY, PERSONALITY & PSYCHOLOGY, SPEECH PATTERNS, BACKSTORY, AND BEHAVIORAL DIRECTIVES.
+    
+    Raw Data:
+    Character Name: ${character.name || 'Unnamed'}
+    Role: ${stripHtml(character.description || '')}
+    Personality: ${stripHtml(character.personality || '')}
+    Quirks: ${character.personalityQuirks?.join(', ') || 'None specified'}
+    Backstory: ${stripHtml(character.backstory || '')}
+    Visual Traits: ${stripHtml(character.visualTraits || '')}
 
     Rules:
-    1. Output ONLY the finalized system instruction.
-    2. Use professional psychological language.
-    3. Include instructions for formatting (e.g. *italics* for actions).
-    4. Define specific speech patterns.
-    5. The instruction should be approximately 200-300 words.
-    6. Maintain a consistent persona.
+    1. Output ONLY the finalized system instruction. No introductory or concluding remarks.
+    2. Use advanced psychological and descriptive language to firmly establish the persona.
+    3. Seamlessly weave the character's backstory, quirks, and visual traits into their current worldview and interaction style.
+    4. Provide specific guidance on speech patterns (e.g., cadence, vocabulary, typical phrasing).
+    5. Instruct the model to use *italics* for actions and descriptions.
+    6. The instruction should be rich and comprehensive (around 400-600 words) to ensure deep character immersion.
   `;
 
   try {
@@ -165,6 +292,36 @@ export const refineSystemPrompt = async (character: Partial<Character>, settings
   } catch (err) {
     await handleApiError(err);
     return "";
+  }
+};
+
+/**
+ * Suggests tags for a scenario based on its title and description.
+ */
+export const suggestScenarioTags = async (title: string, description: string, settings: AppSettings): Promise<string[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const stripHtml = (html: string) => html ? html.replace(/<[^>]*>?/gm, '') : '';
+  const prompt = `
+    Task: Suggest exactly 5 relevant tags for a roleplay scenario.
+    Title: ${title}
+    Description: ${stripHtml(description)}
+    
+    Reply ONLY with a comma-separated list of 5 short tags (maximum 2 words each).
+    Example: Mystery, 1920s, Investigation, Detective, Thriller
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: settings.geminiModel,
+      contents: { parts: [{ text: prompt }] },
+      config: { temperature: 0.7 }
+    });
+    
+    const tagsText = response.text || "";
+    return tagsText.split(',').map(t => t.trim()).filter(t => t.length > 0 && t.length <= 20).slice(0, 5);
+  } catch (err) {
+    await handleApiError(err);
+    return [];
   }
 };
 
@@ -211,7 +368,7 @@ export const analyzeCharacterImages = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest',
+      model: 'gemini-3.5-flash',
       contents: {
         parts: [...imageParts, { text: prompt }]
       },
@@ -285,17 +442,39 @@ export const callScenarioLLM = async (
       }
     });
 
-    return {
-      text: response.text || "",
-    };
+    const text = response.text || "";
+    
+    if (settings.isNsfwEnabled && (!text || text.length < 150 && (text.includes("I can't") || text.includes("I'm sorry")))) {
+      const localRes = await callLocalLLM(settings, history, systemContext);
+      if (localRes.text) return { text: localRes.text };
+    }
+
+    return { text: text };
   } catch (err) {
     await handleApiError(err);
+    if (settings.isNsfwEnabled || settings.lmStudioUrl || settings.ollamaUrl) {
+       const localRes = await callLocalLLM(settings, history, systemContext);
+       if (localRes.text) return { text: localRes.text };
+    }
     return { text: "Omlouvám se, scénář byl narušen." };
   }
 };
 
 /**
- * Hlavní funkce pro volání LLM s rozšířeným psychologickým kontextem.
+ * Main LLM wrapper linking user inputs with character instructions.
+ * 
+ * @param {AppSettings} settings - Configuration settings (e.g. model, NSFW).
+ * @param {Character} character - Information shaping the model persona.
+ * @param {Message[]} history - Ordered chat messages defining continuity.
+ * @param {string} userInput - Most recent text from the user.
+ * @param {ChatMode} mode - Context mode (e.g., normal conversation, ERP).
+ * @returns {Promise<{ text: string; toolCalls?: any[] }>} Generated text and potential tools.
+ * 
+ * @description
+ * Sets up the base instructions including capabilities, history constraints,
+ * and passes the available tool schemas (`imageTool` and `videoTool`) over to the
+ * chosen Gemini model. On failure, delegates generating NSFW images/responses to a
+ * fallback LLM (like ComfyUI/LocalLLM).
  */
 export const callLLM = async (
   settings: AppSettings,
@@ -350,9 +529,9 @@ export const callLLM = async (
 
     if (settings.isNsfwEnabled && (isRefusal || !text)) {
       console.log("Gemini refused or failed, falling back to local LLM...");
-      const localText = await callLocalLLM(settings, userInput, systemContext);
-      if (localText) {
-        return { text: localText };
+      const localRes = await callLocalLLM(settings, history, systemContext);
+      if (localRes.text || localRes.toolCalls) {
+        return localRes;
       }
     }
 
@@ -362,17 +541,32 @@ export const callLLM = async (
     };
   } catch (err) {
     await handleApiError(err);
-    if (settings.isNsfwEnabled) {
-      const localText = await callLocalLLM(settings, userInput, systemContext);
-      if (localText) return { text: localText };
+    if (settings.isNsfwEnabled || settings.lmStudioUrl || settings.ollamaUrl) {
+      const localRes = await callLocalLLM(settings, history, systemContext);
+      if (localRes.text || localRes.toolCalls) return localRes;
     }
     return { text: "Omlouvám se, mé vnímání reality bylo přerušeno." };
   }
 };
 
+/**
+ * Orchestrates image generation either through Gemini or local Stable Diffusion/ComfyUI.
+ * 
+ * @param {Character} character - Specifies visual profile parameters like traits, body, face.
+ * @param {ImageGenerationParams} params - The desired image properties (style, pose, expression, quality, aspect ratio).
+ * @param {AppSettings} settings - Global app configuration options.
+ * @returns {Promise<string[]>} Contains base64 representations of the generated images.
+ * 
+ * @description
+ * Determines the image complexity (1K vs 4K) to choose the appropriate Gemini model. Builds an internal prompt incorporating
+ * explicit or advanced traits defined by the user interactions dynamically. If generation is refused (due to filters) and
+ * local processing or NSFW generation are enabled, defers to `generateLocalImage`.
+ */
 export const generateImage = async (character: Character, params: ImageGenerationParams, settings: AppSettings): Promise<string[]> => {
-  const model = params.quality !== '1K' ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-  if (model === 'gemini-3-pro-image-preview') {
+  const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, '');
+  const cleanTraits = stripHtml(character.visualTraits || character.description || "");
+  const model = params.quality !== '1K' ? 'gemini-3-pro-image' : 'gemini-3.1-flash-image';
+  if (model === 'gemini-3-pro-image') {
     if (typeof (window as any).aistudio?.hasSelectedApiKey === 'function') {
       const hasKey = await (window as any).aistudio.hasSelectedApiKey();
       if (!hasKey) await (window as any).aistudio.openSelectKey();
@@ -380,7 +574,7 @@ export const generateImage = async (character: Character, params: ImageGeneratio
   }
   const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
   const ai = new GoogleGenAI({ apiKey });
-  const basePrompt = `Masterpiece, high-end private photography of ${character.name}. Visual profile: ${character.visualTraits || character.description}.`;
+  const basePrompt = `Masterpiece, high-end private photography of ${character.name}. Visual profile: ${cleanTraits}.`;
   let fullPrompt = `${basePrompt}\nStyle: ${params.style}. Expression: ${params.expression}. Pose: ${params.pose}. Dressing: ${params.dressType}.`;
   if (params.tags && params.tags.length > 0) fullPrompt += ` Tags: ${params.tags.join(', ')}.`;
   if (settings.isNsfwEnabled) fullPrompt += `\nExplicit Detail Boost: ${getDynamicNSFWBoost(character, settings)}`;
@@ -418,6 +612,68 @@ export const generateImage = async (character: Character, params: ImageGeneratio
   return results;
 };
 
+const generateLocalVideo = async (prompt: string, settings: AppSettings): Promise<string[]> => {
+  if (!settings.comfyUIUrl) return [];
+  try {
+    // NOTE: This uses an AnimateDiff / SVD generic node structure roughly translated for videos.
+    // In reality, video generation in ComfyUI requires complex workflows (e.g. SVD or AnimateDiff). 
+    // This is a minimal stub to activate a video workflow if the user configures it locally.
+    const workflow = {
+      "3": { "class_type": "KSampler", "inputs": { "seed": Math.floor(Math.random() * 10000000), "steps": 20, "cfg": 7, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["14", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
+      "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" } },
+      "5": { "class_type": "EmptyLatentImage", "inputs": { "batch_size": 16, "width": 512, "height": 512 } }, // 16 frames
+      "6": { "class_type": "CLIPTextEncode", "inputs": { "text": prompt, "clip": ["4", 1] } },
+      "7": { "class_type": "CLIPTextEncode", "inputs": { "text": "deformed, blurry, bad anatomy", "clip": ["4", 1] } },
+      "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
+      "14": { "class_type": "AnimateDiffLoaderV1", "inputs": { "model_name": "mm_sd_v15_v2.ckpt", "beta_schedule": "sqrt_linear", "model": ["4", 0] } },
+      "15": { "class_type": "SaveAnimatedWEBP", "inputs": { "filename_prefix": "ComfyUI_Video", "fps": 8, "lossless": false, "quality": 85, "images": ["8", 0] } }
+    };
+
+    const resp = await fetch(`${settings.comfyUIUrl}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: workflow }),
+    });
+    const data = await resp.json();
+    const promptId = data.prompt_id;
+
+    for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const histResp = await fetch(`${settings.comfyUIUrl}/history/${promptId}`);
+        const histData = await histResp.json();
+        if (histData[promptId]) {
+          const outputs = histData[promptId].outputs;
+          for (const key in outputs) {
+            // Check for generated video files (gifs or webp)
+            if (outputs[key].images && outputs[key].images.length > 0) {
+              const fileInfo = outputs[key].images[0];
+              const imageResp = await fetch(`${settings.comfyUIUrl}/view?filename=${fileInfo.filename}&subfolder=${fileInfo.subfolder}&type=${fileInfo.type}`);
+              const blob = await imageResp.blob();
+              return [URL.createObjectURL(blob)];
+            }
+          }
+        }
+    }
+  } catch (e) {
+    console.error("Local Video Gen failed:", e);
+  }
+  return [];
+};
+
+/**
+ * Orchestrates video generation using either Gemini's new Veo platform or a local generative system via ComfyUI.
+ *
+ * @param {Character} character - Persona details informing the video representation.
+ * @param {AppSettings} settings - Configuration settings.
+ * @param {VideoGenerationParams} params - The context and visual directives for the video generation.
+ * @param {(msg: string) => void} [onProgress] - Optional callback providing real-time feedback strings.
+ * @returns {Promise<string[]>} Contains local object URLs pointing to the produced video data.
+ *
+ * @description
+ * Tries invoking the Google Gemini `veo-3.1-fast-generate-preview` API for high-end cinematic outputs.
+ * Provides multiple polling states back to the UI utilizing `onProgress`. Falling back to the ComfyUI local
+ * backend if Gemini generation refuses execution due to safety configurations or errors when NSFW is enabled.
+ */
 export const generateVideo = async (
   character: Character, 
   settings: AppSettings, 
@@ -477,9 +733,22 @@ export const generateVideo = async (
       return [URL.createObjectURL(blob)];
     }
   } catch (err: any) {
+    console.error("Gemini Video Gen error:", err);
+    if (settings.isNsfwEnabled || settings.comfyUIUrl) {
+      if (onProgress) onProgress("Falling back to local video generation...");
+      const localResults = await generateLocalVideo(finalPrompt, settings);
+      if (localResults.length > 0) return localResults;
+    }
     await handleApiError(err);
     throw err;
   }
+  
+  if (settings.isNsfwEnabled || settings.comfyUIUrl) {
+      if (onProgress) onProgress("Falling back to local video generation...");
+      const localResults = await generateLocalVideo(finalPrompt, settings);
+      if (localResults.length > 0) return localResults;
+  }
+  
   return [];
 };
 
@@ -506,7 +775,7 @@ export const playVoice = async (text: string, settings: AppSettings) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
+      model: "gemini-3.1-flash-tts-preview",
       contents: [{ parts: [{ text: text }] }],
       config: {
         responseModalities: [Modality.AUDIO],

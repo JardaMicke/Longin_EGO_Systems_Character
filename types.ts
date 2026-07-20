@@ -16,6 +16,7 @@ export interface Scenario {
   lastUpdated: number;
   duration?: number; // in minutes
   interactionRule?: InteractionRule;
+  tags?: string[];
 }
 
 export interface ScenarioSession {
@@ -115,7 +116,8 @@ export interface AppSettings {
   userName: string;
   isNsfwEnabled: boolean;
   isAgeVerified: boolean;
-  stableDiffusionUrl: string; // For local image generation fallback
+  stableDiffusionUrl: string; // For local image generation fallback (A1111)
+  comfyUIUrl: string; // For local image & video generation (ComfyUI)
   voiceEnabled: boolean;
   voiceName: string;
   voiceSpeed: number;

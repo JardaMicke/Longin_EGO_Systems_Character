@@ -36,34 +36,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [searchTag, setSearchTag] = useState('');
-  const [idleAnim, setIdleAnim] = useState<string>('');
+  const currentMood = character.mood || 'happy';
+  const idleAnim = isTyping ? 'animate-pulse' : `animate-idle-${currentMood}`;
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = translations[language];
-
-  useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    if (isTyping) {
-      setIdleAnim('');
-      return;
-    }
-
-    const triggerIdle = () => {
-      const currentMood = character.mood || 'happy';
-      
-      // 30% chance to trigger an idle animation
-      if (Math.random() > 0.7) {
-        setIdleAnim(`animate-idle-${currentMood}`);
-        // Keep it for 3-5 seconds
-        timeoutId = setTimeout(() => setIdleAnim(''), 3000 + Math.random() * 2000);
-      }
-    };
-
-    const interval = setInterval(triggerIdle, 8000 + Math.random() * 5000);
-    return () => {
-      clearInterval(interval);
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [isTyping, character.mood]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -87,7 +63,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       <div className="h-20 border-b border-white/5 flex items-center px-8 gap-5 bg-black/40 backdrop-blur-xl z-10">
         <div className="relative group cursor-pointer">
           <img 
-            src={character.avatar} 
+            src={character.avatar || undefined} 
             alt={character.name} 
             className={`w-12 h-12 rounded-full object-cover ring-2 ring-pink-500/30 transition-all group-hover:ring-pink-500 shadow-xl ${idleAnim}`} 
           />
@@ -195,7 +171,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               }`}>
                 {msg.type === 'image' && (
                   <div className="rounded-2xl overflow-hidden mb-4 border border-white/10 group-hover:scale-[1.02] transition-transform duration-500 relative">
-                    <img src={msg.content} alt="moment" className="w-full h-auto object-cover max-h-[600px]" />
+                    <img src={msg.content || undefined} alt="moment" className="w-full h-auto object-cover max-h-[600px]" />
                     {msg.tags && msg.tags.length > 0 && (
                       <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
                         {msg.tags.map(tag => (
@@ -209,7 +185,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
                 {msg.type === 'video' && (
                   <div className="rounded-2xl overflow-hidden mb-4 border border-white/10 bg-black">
-                    <video controls src={msg.content} className="w-full" autoPlay muted loop />
+                    <video controls src={msg.content || undefined} className="w-full" autoPlay muted loop />
                   </div>
                 )}
                 <p className={`whitespace-pre-wrap leading-relaxed ${msg.role === 'user' ? 'text-[15px] font-semibold' : 'text-[16px] font-medium'} tracking-wide`}>

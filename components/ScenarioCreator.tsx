@@ -2,28 +2,35 @@
 import React, { useState } from 'react';
 import { Character, AppLanguage, Scenario, InteractionRule } from '../types';
 import { translations } from '../locales';
+import { suggestScenarioTags } from '../llmService';
+import { db } from '../db';
 
 interface ScenarioCreatorProps {
   characters: Character[];
   language: AppLanguage;
   onSave: (scenario: Scenario) => void;
   onClose: () => void;
+  initialScenario?: Scenario;
 }
 
 export const ScenarioCreator: React.FC<ScenarioCreatorProps> = ({
   characters,
   language,
   onSave,
-  onClose
+  onClose,
+  initialScenario
 }) => {
   const t = translations[language] as any;
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [userRole, setUserRole] = useState('');
-  const [initialSituation, setInitialSituation] = useState('');
-  const [selectedCharIds, setSelectedCharIds] = useState<string[]>([]);
-  const [duration, setDuration] = useState(30);
-  const [interactionRule, setInteractionRule] = useState<InteractionRule>('cooperative');
+  const [title, setTitle] = useState(initialScenario?.title || '');
+  const [description, setDescription] = useState(initialScenario?.description || '');
+  const [userRole, setUserRole] = useState(initialScenario?.userRole || '');
+  const [initialSituation, setInitialSituation] = useState(initialScenario?.initialSituation || '');
+  const [selectedCharIds, setSelectedCharIds] = useState<string[]>(initialScenario?.characterIds || []);
+  const [duration, setDuration] = useState(initialScenario?.duration || 30);
+  const [interactionRule, setInteractionRule] = useState<InteractionRule>(initialScenario?.interactionRule || 'cooperative');
+  const [tags, setTags] = useState<string[]>(initialScenario?.tags || []);
+  const [tagsInput, setTagsInput] = useState('');
+  const [isSuggestingTags, setIsSuggestingTags] = useState(false);
 
   const toggleCharacter = (id: string) => {
     setSelectedCharIds(prev => 
@@ -31,11 +38,34 @@ export const ScenarioCreator: React.FC<ScenarioCreatorProps> = ({
     );
   };
 
+  const addTag = () => {
+    if (tagsInput.trim() && !tags.includes(tagsInput.trim())) {
+      setTags([...tags, tagsInput.trim()]);
+      setTagsInput('');
+    }
+  };
+
+  const removeTag = (index: number) => {
+    setTags(tags.filter((_, i) => i !== index));
+  };
+
+  const handleSuggestTags = async () => {
+    if (!title || !description) return;
+    setIsSuggestingTags(true);
+    const settings = await db.getSettings();
+    const suggested = await suggestScenarioTags(title, description, settings);
+    if (suggested && suggested.length > 0) {
+      const newTags = new Set([...tags, ...suggested]);
+      setTags(Array.from(newTags));
+    }
+    setIsSuggestingTags(false);
+  };
+
   const handleSave = () => {
     if (!title || !description || selectedCharIds.length === 0) return;
 
     const newScenario: Scenario = {
-      id: Date.now().toString(),
+      id: initialScenario ? initialScenario.id : Date.now().toString(),
       title,
       description,
       characterIds: selectedCharIds,
@@ -43,6 +73,7 @@ export const ScenarioCreator: React.FC<ScenarioCreatorProps> = ({
       initialSituation,
       duration,
       interactionRule,
+      tags,
       lastUpdated: Date.now()
     };
 
@@ -77,12 +108,22 @@ export const ScenarioCreator: React.FC<ScenarioCreatorProps> = ({
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">{t.scenario_desc}</label>
-            <textarea 
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-pink-500 outline-none transition-all h-24 resize-none"
-              placeholder="Describe the overall context..."
+            <div className="flex justify-between items-end">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">{t.scenario_desc}</label>
+              <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+                <button type="button" onClick={() => document.execCommand('bold')} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white rounded-md hover:bg-slate-700 transition-colors font-bold">B</button>
+                <button type="button" onClick={() => document.execCommand('italic')} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white rounded-md hover:bg-slate-700 transition-colors italic">I</button>
+                <button type="button" onClick={() => document.execCommand('insertUnorderedList')} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white rounded-md hover:bg-slate-700 transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+                </button>
+              </div>
+            </div>
+            <div 
+              contentEditable
+              dangerouslySetInnerHTML={{ __html: description }}
+              onBlur={e => setDescription((e.target as HTMLDivElement).innerHTML)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-all min-h-[150px] leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-slate-500"
+              data-placeholder="Describe the overall context using rich formatting..."
             />
           </div>
 
@@ -109,7 +150,7 @@ export const ScenarioCreator: React.FC<ScenarioCreatorProps> = ({
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                     }`}
                   >
-                    <img src={char.avatar} className="w-5 h-5 rounded-full object-cover" alt="" />
+                    <img src={char.avatar || undefined} className="w-5 h-5 rounded-full object-cover" alt="" />
                     <span className="text-xs font-medium">{char.name}</span>
                   </button>
                 ))}
@@ -158,6 +199,51 @@ export const ScenarioCreator: React.FC<ScenarioCreatorProps> = ({
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-pink-500 outline-none transition-all h-32 resize-none"
               placeholder="How does the story begin?"
             />
+          </div>
+
+          <div className="space-y-3 bg-slate-800/30 p-5 rounded-2xl border border-slate-800">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">{t.tags || 'Tags'}</label>
+              <button 
+                type="button" 
+                onClick={handleSuggestTags}
+                disabled={isSuggestingTags || !title || !description}
+                className="text-[10px] font-black uppercase tracking-widest text-pink-500 hover:text-pink-400 transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isSuggestingTags ? (
+                  <div className="w-3 h-3 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                )}
+                {t.auto_suggest || 'Auto Suggest'}
+              </button>
+            </div>
+            <div className="flex gap-4">
+              <input 
+                value={tagsInput} 
+                onChange={e => setTagsInput(e.target.value)} 
+                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())} 
+                placeholder={t.add_tag || 'Add a tag...'} 
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-pink-500 outline-none transition-all" 
+              />
+              <button 
+                type="button" 
+                onClick={addTag} 
+                className="px-6 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all"
+              >
+                {t.add || 'Add'}
+              </button>
+            </div>
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                {tags.map((tag, i) => (
+                  <span key={i} className="px-3 py-1.5 bg-pink-500/10 text-pink-400 border border-pink-500/20 rounded-lg text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 transition-all hover:bg-pink-500/20">
+                    {tag} 
+                    <button onClick={() => removeTag(i)} className="text-slate-500 hover:text-white transition-colors">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

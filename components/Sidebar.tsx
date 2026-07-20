@@ -17,6 +17,7 @@ interface SidebarProps {
   onOpenScenarioCreator: () => void;
   onDeleteCharacter: (id: string) => void;
   onDeleteScenario: (id: string) => void;
+  onEditScenario?: (scenario: Scenario) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -32,7 +33,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenCreator,
   onOpenScenarioCreator,
   onDeleteCharacter,
-  onDeleteScenario
+  onDeleteScenario,
+  onEditScenario
 }) => {
   const t = translations[language] as any;
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -142,44 +144,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
 
             {filteredCharacters.length === 0 && (
-              <div className="text-center py-10 text-slate-600 text-xs uppercase tracking-widest">
-                {t.no_characters_found}
+              <div className="text-center py-16 px-4 flex flex-col items-center justify-center opacity-70">
+                <div className="w-16 h-16 rounded-full bg-slate-800/50 flex items-center justify-center mb-4 border border-slate-700">
+                   <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                   </svg>
+                </div>
+                <h4 className="text-sm font-bold text-slate-300 mb-1">{t.no_characters_found}</h4>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest text-center">{language === 'cs' ? 'Vytvořte svou první postavu kliknutím na tlačítko výše.' : 'Create your first character by clicking the button above.'}</p>
               </div>
             )}
 
             {filteredCharacters.map(char => (
               <div
                 key={char.id}
-                className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all relative ${
-                  selectedId === char.id && !selectedScenarioId ? 'bg-slate-800 ring-1 ring-slate-700' : 'hover:bg-slate-800/50'
+                className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all relative cursor-pointer border ${
+                  selectedId === char.id && !selectedScenarioId 
+                    ? 'bg-slate-800 border-pink-500/30 ring-1 ring-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.1)]' 
+                    : 'border-transparent hover:bg-slate-800/50 hover:border-slate-700/50'
                 }`}
+                onClick={() => onSelect(char.id)}
               >
-                <button 
-                  onClick={() => onSelect(char.id)}
-                  className="flex items-center gap-4 flex-1 text-left overflow-hidden"
-                >
+                <div className="flex items-center gap-4 flex-1 text-left overflow-hidden">
                   <div className="relative flex-shrink-0 group/avatar overflow-hidden rounded-full">
                     <img 
-                      src={char.avatar} 
+                      src={char.avatar || undefined} 
                       alt={char.name} 
-                      className={`w-12 h-12 rounded-full object-cover border border-slate-700 transition-all duration-500 
-                        group-hover/avatar:scale-125 group-hover/avatar:rotate-6 
-                        ${selectedId === char.id && !selectedScenarioId ? 'avatar-selected' : ''}`} 
+                      className={`w-12 h-12 rounded-full object-cover border-2 transition-all duration-500 
+                        group-hover/avatar:scale-110
+                        ${selectedId === char.id && !selectedScenarioId ? 'border-pink-500' : 'border-slate-700'}`} 
                     />
                     {selectedId === char.id && !selectedScenarioId && (
-                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                      <span className="absolute -bottom-0 -right-0 flex h-3.5 w-3.5">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-pink-500"></span>
+                        <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-pink-500 border-2 border-slate-900"></span>
                       </span>
                     )}
                   </div>
-                  <div className="flex-1 overflow-hidden">
-                    <h3 className={`font-semibold transition-colors ${selectedId === char.id && !selectedScenarioId ? 'text-pink-400' : 'text-slate-200'}`}>
-                      {char.name}
-                    </h3>
-                    <p className="text-xs text-slate-500 truncate">{char.description}</p>
+                  <div className="flex-1 overflow-hidden flex flex-col justify-center">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <h3 className={`font-semibold text-sm truncate transition-colors ${selectedId === char.id && !selectedScenarioId ? 'text-pink-400' : 'text-slate-200 group-hover:text-white'}`}>
+                        {char.name}
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-500 truncate group-hover:text-slate-400 transition-colors line-clamp-1">{char.description || (language === 'cs' ? 'Bez popisu' : 'No description')}</p>
                   </div>
-                </button>
+                </div>
                 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
                   <button 
@@ -223,36 +233,80 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
 
             {scenarios.length === 0 && (
-              <div className="text-center py-10 text-slate-600 text-xs uppercase tracking-widest">
-                {t.no_scenarios}
+              <div className="text-center py-16 px-4 flex flex-col items-center justify-center opacity-70">
+                <div className="w-16 h-16 rounded-full bg-slate-800/50 flex items-center justify-center mb-4 border border-slate-700">
+                   <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                   </svg>
+                </div>
+                <h4 className="text-sm font-bold text-slate-300 mb-1">{t.no_scenarios}</h4>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest text-center">{language === 'cs' ? 'Napište svůj první příběh kliknutím na tlačítko výše.' : 'Write your first story by clicking the button above.'}</p>
               </div>
             )}
 
             {scenarios.map(scenario => (
               <div
                 key={scenario.id}
-                className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all relative ${
-                  selectedScenarioId === scenario.id ? 'bg-slate-800 ring-1 ring-slate-700' : 'hover:bg-slate-800/50'
+                className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all relative cursor-pointer border ${
+                  selectedScenarioId === scenario.id 
+                    ? 'bg-slate-800 border-pink-500/30 ring-1 ring-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.1)]' 
+                    : 'border-transparent hover:bg-slate-800/50 hover:border-slate-700/50'
                 }`}
+                onClick={() => onSelectScenario(scenario.id)}
               >
-                <button 
-                  onClick={() => onSelectScenario(scenario.id)}
-                  className="flex items-center gap-4 flex-1 text-left overflow-hidden"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700 group-hover:bg-slate-700 transition-colors">
-                    <svg className={`w-6 h-6 ${selectedScenarioId === scenario.id ? 'text-pink-500' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                <div className="flex items-center gap-4 flex-1 text-left overflow-hidden">
+                  <div className={`flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center border transition-colors ${
+                      selectedScenarioId === scenario.id ? 'bg-pink-900/20 border-pink-500' : 'bg-slate-800 border-slate-700 group-hover:bg-slate-700'
+                    }`}>
+                    <svg className={`w-6 h-6 transition-all duration-500 group-hover:scale-110 ${selectedScenarioId === scenario.id ? 'text-pink-500' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                     </svg>
                   </div>
-                  <div className="flex-1 overflow-hidden">
-                    <h3 className={`font-semibold transition-colors truncate ${selectedScenarioId === scenario.id ? 'text-pink-400' : 'text-slate-200'}`}>
-                      {scenario.title}
-                    </h3>
-                    <p className="text-xs text-slate-500 truncate">{scenario.description}</p>
+                  <div className="flex-1 overflow-hidden flex flex-col justify-center">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <h3 className={`font-semibold text-sm truncate transition-colors ${selectedScenarioId === scenario.id ? 'text-pink-400' : 'text-slate-200 group-hover:text-white'}`}>
+                        {scenario.title}
+                      </h3>
+                    </div>
+                    {scenario.characterIds && scenario.characterIds.length > 0 && (
+                       <span className="text-[9px] uppercase tracking-wider font-bold text-violet-400 mb-0.5 block truncate">
+                         {language === 'cs' ? 'Postav: ' : 'Chars: '} {scenario.characterIds.length}
+                       </span>
+                    )}
+                    <p className="text-xs text-slate-500 truncate group-hover:text-slate-400 transition-colors line-clamp-1">{scenario.description.replace(/<[^>]*>?/gm, '') || (language === 'cs' ? 'Bez popisu' : 'No description')}</p>
+                    
+                    {scenario.tags && scenario.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {scenario.tags.slice(0, 3).map((tag, i) => (
+                          <span key={i} className={`text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-sm ${selectedScenarioId === scenario.id ? 'bg-pink-500/20 text-pink-300' : 'bg-white/5 text-slate-400'}`}>
+                            {tag}
+                          </span>
+                        ))}
+                        {scenario.tags.length > 3 && (
+                          <span className={`text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-sm ${selectedScenarioId === scenario.id ? 'bg-pink-500/20 text-pink-300' : 'bg-white/5 text-slate-400'}`}>
+                            +{scenario.tags.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </button>
+                </div>
                 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                  {onEditScenario && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditScenario(scenario);
+                      }}
+                      className="p-2 hover:bg-pink-900/30 rounded-lg transition-all text-slate-400 hover:text-pink-500"
+                      title={language === 'cs' ? 'Upravit scénář' : 'Edit Scenario'}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
+                  )}
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();

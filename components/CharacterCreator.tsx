@@ -136,157 +136,7 @@ const ARCHETYPES: Archetype[] = [
   }
 ];
 
-// Custom Body Visualizer Component using Parametric SVG
-const BodyVisualizer: React.FC<{ body: BodySpecs; face: FaceSpecs }> = ({ body, face }) => {
-  // Normalize values (most inputs 0-100)
-  const h = (body.height - 140) / 60; // 0 to 1 normalized height factor
-
-  // Parametric Dimensions
-  const scaleY = 1 + h * 0.2; // Taller bodies stretch
-  const shoulderW = 80 + body.shoulders * 0.6;
-  const chestW = 70 + body.chest * 0.5;
-  const waistW = 40 + body.waist * 0.6;
-  const hipsW = 80 + body.hips * 0.7;
-  const thighW = 30 + body.legs * 0.4;
-  const bustSize = body.chest * 0.5; // Controls cup curve
-  
-  // New granular specs
-  const neckL = 15 + body.neckLength * 0.3;
-  const armW = 10 + body.armThickness * 0.3;
-  const calfW = 10 + body.calfSize * 0.4;
-  const bellyW = body.bellySize * 0.3;
-  
-  // Center X is 150
-  const cx = 150;
-  
-  // Dynamic Paths
-  const neckPath = `M ${cx-15} 80 L ${cx-15} ${80 - neckL} L ${cx+15} ${80 - neckL} L ${cx+15} 80 Z`;
-  
-  // Torso Silhouette (Hourglass logic)
-  const torsoPath = `
-    M ${cx - shoulderW/2} 80 
-    Q ${cx - shoulderW/2} 110, ${cx - chestW/2} 120
-    Q ${cx - waistW/2 - 5 - bellyW} 150, ${cx - waistW/2} 180
-    Q ${cx - hipsW/2} 210, ${cx - hipsW/2} 240
-    L ${cx + hipsW/2} 240
-    Q ${cx + hipsW/2} 210, ${cx + waistW/2} 180
-    Q ${cx + waistW/2 + 5 + bellyW} 150, ${cx + chestW/2} 120
-    Q ${cx + shoulderW/2} 110, ${cx + shoulderW/2} 80
-    Z
-  `;
-
-  // Breast definition (Curve overlay)
-  const breastPath = `
-    M ${cx} 110
-    Q ${cx - 10} 110, ${cx - chestW/3} 130
-    Q ${cx - chestW/3} 150 + ${bustSize/3}, ${cx} 150 + ${bustSize/3}
-    Q ${cx + chestW/3} 150 + ${bustSize/3}, ${cx + chestW/3} 130
-    Q ${cx + 10} 110, ${cx} 110
-  `;
-  
-  // Abs definition (Muscle tone)
-  const absOpacity = body.muscleTone / 100;
-  const absPath = `
-    M ${cx} 130 L ${cx} 190
-    M ${cx-10} 145 H ${cx+10}
-    M ${cx-10} 160 H ${cx+10}
-    M ${cx-10} 175 H ${cx+10}
-  `;
-
-  // Arms (Simplified)
-  const armsPath = `
-    M ${cx - shoulderW/2} 85
-    L ${cx - shoulderW/2 - 25} 220
-    L ${cx - shoulderW/2 - 25 + armW} 220
-    L ${cx - shoulderW/2 + armW} 85
-    Z
-    M ${cx + shoulderW/2} 85
-    L ${cx + shoulderW/2 + 25} 220
-    L ${cx + shoulderW/2 + 25 - armW} 220
-    L ${cx + shoulderW/2 - armW} 85
-    Z
-  `;
-
-  // Legs with calves
-  const legsPath = `
-    M ${cx - hipsW/2} 240
-    Q ${cx - hipsW/2 - 10} 300, ${cx - thighW - 10} 400
-    Q ${cx - thighW - 10 - calfW} 480, ${cx - thighW - 10} 580
-    L ${cx - 20} 580
-    L ${cx - 5} 250
-    L ${cx + 5} 250
-    L ${cx + 20} 580
-    L ${cx + thighW + 10} 580
-    Q ${cx + thighW + 10 + calfW} 480, ${cx + thighW + 10} 400
-    Q ${cx + hipsW/2 + 10} 300, ${cx + hipsW/2} 240
-    Z
-  `;
-
-  // Head
-  const headW = 50 + face.roundness * 0.1;
-  const headH = 65 + face.forehead * 0.1;
-  const headY = 80 - neckL - headH/2;
-  
-  return (
-    <div className="relative w-full h-[600px] flex items-center justify-center">
-      <svg 
-        viewBox="0 0 300 600" 
-        className="h-full w-auto drop-shadow-[0_0_15px_rgba(236,72,153,0.3)]"
-        style={{ transform: `scaleY(${scaleY})` }}
-      >
-        <defs>
-          <linearGradient id="skinGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#374151" />
-            <stop offset="50%" stopColor="#4b5563" />
-            <stop offset="100%" stopColor="#374151" />
-          </linearGradient>
-          <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(236, 72, 153, 0.2)" />
-            <stop offset="100%" stopColor="transparent" />
-          </radialGradient>
-        </defs>
-
-        {/* Aura */}
-        <ellipse cx={cx} cy="300" rx="140" ry="280" fill="url(#glow)" className="animate-pulse" />
-
-        {/* Body Parts */}
-        <g fill="url(#skinGradient)" stroke="rgba(255,255,255,0.1)" strokeWidth="1">
-          {/* Head */}
-          <ellipse cx={cx} cy={headY} rx={headW/2} ry={headH/2} />
-          
-          {/* Neck */}
-          <path d={neckPath} />
-          
-          {/* Torso */}
-          <path d={torsoPath} className="animate-[breathing_4s_ease-in-out_infinite]" />
-
-          {/* Arms */}
-          <path d={armsPath} />
-          
-          {/* Legs */}
-          <path d={legsPath} />
-        </g>
-
-        {/* Details (Breasts) */}
-        <path d={breastPath} fill="none" stroke="rgba(0,0,0,0.3)" strokeWidth="2" className="animate-[breathing_4s_ease-in-out_infinite]" />
-        
-        {/* Muscle Definition */}
-        <path d={absPath} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="1" opacity={absOpacity} />
-        
-        {/* Wireframe Overlay (Cyberpunk feel) */}
-        <path d={torsoPath} fill="none" stroke="rgba(236, 72, 153, 0.3)" strokeWidth="0.5" strokeDasharray="2 4" opacity="0.5" />
-      </svg>
-      
-      <style>{`
-        @keyframes breathing {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.02); }
-        }
-      `}</style>
-    </div>
-  );
-};
-
+import { Character3DModel } from './Character3DModel';
 
 const SUGGESTED_TAGS = [
   'Assistant', 'Friend', 'Romance', 'Fantasy', 'Sci-Fi', 'Mystery', 'Horror', 
@@ -296,7 +146,6 @@ const SUGGESTED_TAGS = [
 
 export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, language }) => {
   const t = translations[language];
-  const settings = db.getSettings();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [personality, setPersonality] = useState('');
@@ -353,6 +202,19 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoUploadRef = useRef<HTMLInputElement>(null);
+  const avatarUploadRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setAvatar(base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Auto-generate system prompt if it hasn't been manually edited
   useEffect(() => {
@@ -364,9 +226,10 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
 
   const handleRefinePrompt = async () => {
     setIsRefining(true);
+    const currentSettings = await db.getSettings();
     const refined = await refineSystemPrompt({
       name, description, personality, personalityQuirks: quirks, backstory, visualTraits
-    }, settings);
+    }, currentSettings);
     if (refined) {
       setSystemPrompt(refined);
       setIsSystemPromptDirty(true);
@@ -513,18 +376,50 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
              ))}
           </div>
 
-          <BodyVisualizer body={body} face={face} />
+          <Character3DModel body={body} face={face} />
 
           <div className="w-full space-y-4 px-4 pb-4 z-10">
              <div className="relative group rounded-3xl overflow-hidden border-2 border-pink-500/20 shadow-2xl transition-all duration-500 hover:border-pink-500/40">
-              <img src={avatar} alt="preview" className="w-full aspect-[3/4] object-cover transition-transform duration-1000 group-hover:scale-110" />
-              <button 
-                type="button" 
-                onClick={() => setAvatar(`https://picsum.photos/seed/${Math.random()}/400/600`)}
-                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] font-black text-white uppercase tracking-[0.2em] transition-all duration-300 backdrop-blur-sm"
-              >
-                {language === 'cs' ? 'Změnit vzhled' : 'Shuffle Appearance'}
-              </button>
+              <img src={avatar || undefined} alt="preview" className="w-full aspect-[3/4] object-cover transition-transform duration-1000 group-hover:scale-110" />
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
+                <button 
+                  type="button" 
+                  onClick={() => setAvatar(`https://picsum.photos/seed/${Math.random()}/400/600`)}
+                  className="px-6 py-2 bg-pink-600 hover:bg-pink-500 rounded-full text-[10px] font-black text-white uppercase tracking-[0.2em] transition-all duration-300 shadow-lg shadow-pink-900/40"
+                >
+                  {language === 'cs' ? 'Změnit vzhled' : 'Shuffle Appearance'}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => avatarUploadRef.current?.click()}
+                  className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-full text-[10px] font-black text-white uppercase tracking-[0.2em] transition-all duration-300 shadow-lg shadow-indigo-900/40"
+                >
+                  {language === 'cs' ? 'Nahrát obrázek' : 'Upload Image'}
+                </button>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  ref={avatarUploadRef} 
+                  onChange={handleAvatarUpload} 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    const canvas = document.getElementById('character-canvas') as HTMLCanvasElement;
+                    if (canvas) {
+                      setAvatar(canvas.toDataURL('image/png'));
+                      const traitsToAppend = `3D Model Base - Height: ${body.height}cm, Chest/Shoulders: ${body.chest}/${body.shoulders}, Facial Roundness: ${face.roundness}, Eye/Lip Size: ${face.eyeSize}/${face.lipsSize}`;
+                      if (!visualTraits.includes('3D Model Base')) {
+                        setVisualTraits(prev => prev ? `${prev}. ${traitsToAppend}` : traitsToAppend);
+                      }
+                    }
+                  }}
+                  className="px-6 py-2 bg-violet-600 hover:bg-violet-500 rounded-full text-[10px] font-black text-white uppercase tracking-[0.2em] transition-all duration-300 shadow-lg shadow-violet-900/40"
+                >
+                  {language === 'cs' ? 'Zachytit 3D Model' : 'Capture 3D Model'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -666,8 +561,23 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
                   <input required value={greeting} onChange={e => setGreeting(e.target.value)} placeholder="Ahoj, konečně jsi tady..." className="w-full bg-white/5 border border-white/10 rounded-[1.5rem] p-5 focus:border-pink-500/50 focus:ring-4 focus:ring-pink-500/10 outline-none text-white font-semibold transition-all" />
                 </div>
                 <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 ml-1">{t.visual_traits}</label>
-                  <textarea rows={4} value={visualTraits} onChange={e => setVisualTraits(e.target.value)} placeholder="Describe appearance, clothing, style (e.g. 'Tall, neon hair, cyberpunk jacket')..." className="w-full bg-white/5 border border-white/10 rounded-[1.5rem] p-5 focus:border-pink-500/50 focus:ring-4 focus:ring-pink-500/10 outline-none text-white font-semibold resize-none transition-all" />
+                  <div className="flex justify-between items-end">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 ml-1">{t.visual_traits}</label>
+                    <div className="flex bg-white/5 rounded-lg p-1 border border-white/10">
+                      <button type="button" onClick={() => handleCommand('bold')} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white rounded-md hover:bg-white/10 transition-colors font-bold">B</button>
+                      <button type="button" onClick={() => handleCommand('italic')} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white rounded-md hover:bg-white/10 transition-colors italic">I</button>
+                      <button type="button" onClick={() => handleCommand('insertUnorderedList')} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white rounded-md hover:bg-white/10 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div 
+                    contentEditable
+                    dangerouslySetInnerHTML={{ __html: visualTraits }}
+                    onBlur={e => setVisualTraits((e.target as HTMLDivElement).innerHTML)}
+                    className="w-full bg-white/5 border border-white/10 rounded-[1.5rem] p-5 focus:outline-none focus:border-pink-500/50 focus:ring-4 focus:ring-pink-500/10 text-white font-semibold transition-all min-h-[120px] leading-relaxed empty:before:content-[attr(data-placeholder)] empty:before:text-slate-500"
+                    data-placeholder="Describe appearance, clothing, style (e.g. 'Tall, neon hair, cyberpunk jacket')..."
+                  />
                 </div>
               </div>
             )}
@@ -752,8 +662,9 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
                     <div 
                       ref={editorRef}
                       contentEditable 
-                      onInput={(e) => setBackstory((e.target as HTMLDivElement).innerHTML)}
-                      className="w-full min-h-[350px] bg-black/40 p-8 focus:outline-none text-slate-300 text-base leading-[1.8] backstory-content transition-all"
+                      dangerouslySetInnerHTML={{ __html: backstory }}
+                      onBlur={(e) => setBackstory((e.target as HTMLDivElement).innerHTML)}
+                      className="w-full min-h-[350px] bg-black/40 p-8 focus:outline-none text-slate-300 text-base leading-[1.8] backstory-content transition-all empty:before:content-[attr(data-placeholder)] empty:before:text-slate-500"
                       data-placeholder="Napište unikátní životní cestu postavy..."
                     />
                   </div>
