@@ -17,12 +17,15 @@ export interface Scenario {
   duration?: number; // in minutes
   interactionRule?: InteractionRule;
   tags?: string[];
+  nodes?: any[];
+  edges?: any[];
 }
 
 export interface ScenarioSession {
   scenarioId: string;
   messages: Message[];
   isNarratorMode: boolean;
+  currentNodeId?: string;
 }
 export type VoiceAccent = 'american' | 'british' | 'australian' | 'indian' | 'neutral';
 export type CharacterMood = 'happy' | 'sad' | 'energetic' | 'calm' | 'angry' | 'mysterious' | 'seductive';
@@ -53,6 +56,15 @@ export interface FaceSpecs {
   earSize: number;
 }
 
+
+export interface ContextMedia {
+  id: string;
+  type: 'image' | 'video' | 'text';
+  data: string;
+  mimeType?: string;
+  name?: string;
+}
+
 export interface CharacterProfile {
   age: number;
   height: string;
@@ -64,6 +76,13 @@ export interface CharacterProfile {
   gallery: string[];
 }
 
+
+export interface MoodMemory {
+  mood: CharacterMood;
+  timestamp: number;
+  reason: string;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -71,8 +90,11 @@ export interface Character {
   description: string;
   personality: string;
   mood?: CharacterMood;
+  moodHistory?: MoodMemory[];
   greeting: string;
-  tags: string[];
+  tags?: string[];
+  nodes?: any[];
+  edges?: any[];
   systemPrompt: string;
   visualTraits: string;
   backstory?: string;
@@ -80,18 +102,20 @@ export interface Character {
   bodySpecs?: BodySpecs;
   faceSpecs?: FaceSpecs;
   profile?: CharacterProfile;
+  contextMedia?: ContextMedia[];
   lastMessage?: string;
   temperature?: number;
   topK?: number;
   topP?: number;
+  voiceName?: string;
 }
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
-  type: 'text' | 'image' | 'video' | 'narration';
+  type: 'text' | 'image' | 'video' | 'narration' | 'system';
   mode?: ChatMode;
   mimeType?: string;
   tags?: string[];
@@ -111,6 +135,7 @@ export interface AppSettings {
   ollamaUrl: string;
   ollamaModel: string;
   lmStudioUrl: string;
+  lmStudioModel: string;
   geminiModel: string;
   nsfwModel: string; // Model to use when NSFW is enabled
   userName: string;
@@ -125,6 +150,10 @@ export interface AppSettings {
   voiceEffect: VoiceEffect;
   voiceAccent: VoiceAccent;
   voiceAccentStrength: number;
+  uiVolume: number;
+  messageSoundEnabled: boolean;
+  moodSoundEnabled: boolean;
+  globalInstructions?: string;
 }
 
 export interface ImageGenerationParams {
@@ -135,10 +164,17 @@ export interface ImageGenerationParams {
   expression: string;
   dressType: string;
   props: string[];
-  tags: string[];
+  tags?: string[];
+  nodes?: any[];
+  edges?: any[];
   isSequential: boolean;
+  referenceImage?: string;
+  controlNetStrength?: number;
+  denoise?: number;
   count: number;
   allAngles: boolean;
+  useConsistentCharacter?: boolean;
+  photorealisticBoost?: boolean;
 }
 
 export interface VideoGenerationParams {
@@ -148,6 +184,8 @@ export interface VideoGenerationParams {
   startImage?: string; // base64
   endImage?: string;   // base64
   segments: number;
+  useConsistentCharacter?: boolean;
+  photorealisticBoost?: boolean;
 }
 
 export interface VideoTemplate {

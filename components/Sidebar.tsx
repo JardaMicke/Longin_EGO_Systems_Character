@@ -4,6 +4,8 @@ import { Character, AppLanguage, Scenario } from '../types';
 import { translations } from '../locales';
 
 interface SidebarProps {
+  isOpen?: boolean;
+  onCloseMobile?: () => void;
   characters: Character[];
   scenarios: Scenario[];
   selectedId: string | null;
@@ -13,14 +15,16 @@ interface SidebarProps {
   onSelectScenario: (id: string) => void;
   onViewProfile: (id: string) => void;
   onOpenSettings: () => void;
+  onOpenImageEditor: () => void;
   onOpenCreator: () => void;
   onOpenScenarioCreator: () => void;
   onDeleteCharacter: (id: string) => void;
   onDeleteScenario: (id: string) => void;
   onEditScenario?: (scenario: Scenario) => void;
+  onOpenGraphEditor?: (scenario: Scenario) => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ 
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile, 
   characters, 
   scenarios,
   selectedId, 
@@ -30,11 +34,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectScenario,
   onViewProfile,
   onOpenSettings,
+  onOpenImageEditor,
   onOpenCreator,
   onOpenScenarioCreator,
   onDeleteCharacter,
   onDeleteScenario,
-  onEditScenario
+  onEditScenario,
+  onOpenGraphEditor
 }) => {
   const t = translations[language] as any;
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -66,20 +72,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className="w-80 h-full bg-slate-900 border-r border-slate-800 flex flex-col relative">
+    <>
+      {isOpen && <div className="fixed inset-0 bg-black/80 z-[90] md:hidden backdrop-blur-sm cursor-pointer touch-manipulation" onClick={onCloseMobile} />}
+    <div className={`fixed inset-y-0 left-0 z-[100] w-80 max-w-[85vw] pointer-events-auto bg-slate-900 border-r border-slate-800 flex flex-col transition-transform duration-300 shadow-2xl ${isOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:translate-x-0`}>
       <div className="p-6 flex items-center justify-between border-b border-slate-800">
         <h1 className="text-xl font-bold bg-gradient-to-r from-pink-500 to-violet-500 bg-clip-text text-transparent">
           {t.sidebar_title}
         </h1>
-        <button 
-          onClick={onOpenSettings}
-          className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
-        >
-          <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </button>
+        
+        <div className="flex gap-2">
+
+          <button 
+            onClick={onOpenImageEditor}
+            className="p-2 hover:bg-slate-800 rounded-lg transition-colors group relative"
+            title={language === 'cs' ? 'Editor fotografií' : 'Photo Editor'}
+          >
+            <svg className="w-5 h-5 text-slate-400 group-hover:text-pink-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </button>
+
+          <button 
+            onClick={onOpenSettings}
+            className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+          
+          <button 
+            onClick={onCloseMobile}
+            className="md:hidden flex items-center justify-center gap-2 px-3 py-2 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/20 rounded-lg transition-colors text-pink-500 font-bold text-xs uppercase tracking-wider"
+          >
+            Zavřít
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+
+        </div>
+
       </div>
 
       <div className="flex border-b border-slate-800">
@@ -293,6 +325,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                  
+                  {onOpenGraphEditor && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenGraphEditor(scenario);
+                      }}
+                      className="p-2 hover:bg-emerald-900/30 rounded-lg transition-all text-slate-400 hover:text-emerald-500"
+                      title="Open Graph Editor"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10h6m-6 4h6m-6 4h6" />
+                      </svg>
+                    </button>
+                  )}
+
                   {onEditScenario && (
                     <button 
                       onClick={(e) => {
@@ -398,5 +447,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {t.private_session} • local-db-v1
       </div>
     </div>
+    </>
   );
 };

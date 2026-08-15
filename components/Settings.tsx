@@ -12,6 +12,102 @@ interface SettingsProps {
 export const Settings: React.FC<SettingsProps> = ({ settings, onSave, onClose }) => {
   const [formData, setFormData] = React.useState<AppSettings>(settings);
   const [showAgeVerification, setShowAgeVerification] = React.useState(false);
+  const [availableModels, setAvailableModels] = React.useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = React.useState(false);
+  const [modelFetchError, setModelFetchError] = React.useState('');
+
+  React.useEffect(() => {
+    if (formData.provider === 'ollama') {
+      setIsFetchingModels(true);
+      setModelFetchError('');
+      const baseUrl = formData.ollamaUrl.replace(/\/$/, '');
+      fetch(`${baseUrl}/api/tags`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch');
+          return res.json();
+        })
+        .then(data => {
+          if (data && data.models) {
+            setAvailableModels(data.models.map((m: any) => m.name));
+            if (data.models.length > 0 && (!formData.ollamaModel || !data.models.some((m: any) => m.name === formData.ollamaModel))) {
+              setFormData(prev => ({ ...prev, ollamaModel: data.models[0].name }));
+            }
+          } else {
+            setAvailableModels([]);
+          }
+        })
+        .catch(err => {
+          setModelFetchError('Connection failed. Is Ollama running?');
+          setAvailableModels([]);
+        })
+        .finally(() => setIsFetchingModels(false));
+    } else if (formData.provider === 'lmstudio') {
+      setIsFetchingModels(true);
+      setModelFetchError('');
+      const baseUrl = formData.lmStudioUrl.replace(/\/$/, '');
+      fetch(`${baseUrl}/models`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch');
+          return res.json();
+        })
+        .then(data => {
+          if (data && data.data) {
+            setAvailableModels(data.data.map((m: any) => m.id));
+            if (data.data.length > 0 && (!formData.lmStudioModel || !data.data.some((m: any) => m.id === formData.lmStudioModel))) {
+              setFormData(prev => ({ ...prev, lmStudioModel: data.data[0].id }));
+            }
+          } else {
+            setAvailableModels([]);
+          }
+        })
+        .catch(err => {
+          setModelFetchError('Connection failed. Is LM Studio running?');
+          setAvailableModels([]);
+        })
+        .finally(() => setIsFetchingModels(false));
+    } else {
+      setAvailableModels([]);
+    }
+  }, [formData.provider, formData.ollamaUrl, formData.lmStudioUrl]);
+
+    const [downloadProgress, setDownloadProgress] = React.useState<Record<string, number>>({});
+  
+  const startModelDownload = async (url: string, type: string, filename: string) => {
+    try {
+      const taskId = `${type}_${filename}`;
+      const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+      const res = await fetch(`${backendUrl}/api/models/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, model_type: type, filename })
+      });
+      const data = await res.json();
+      
+      if (data.status === 'exists') {
+        setDownloadProgress(prev => ({ ...prev, [taskId]: 100 }));
+        return;
+      }
+      
+      // Start polling
+      const poll = setInterval(async () => {
+        try {
+          const pRes = await fetch(`${backendUrl}/api/models/download/${taskId}`);
+          const pData = await pRes.json();
+          setDownloadProgress(prev => ({ ...prev, [taskId]: pData.progress }));
+          
+          if (pData.progress === 100 || pData.progress === -1) {
+            clearInterval(poll);
+          }
+        } catch (e) {
+          clearInterval(poll);
+        }
+      }, 2000);
+      
+    } catch (e) {
+      console.error('Download start failed:', e);
+    }
+  };
+
   const t = translations[formData.language];
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -147,6 +243,18 @@ pause
             />
           </div>
 
+
+          <div>
+            <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Global Instructions (Behavioral Overrides)</label>
+            <p className="text-[10px] text-slate-500 mb-2">These instructions will be appended to every character's system prompt.</p>
+            <textarea 
+              className="w-full bg-slate-800 border-none rounded-lg p-2.5 focus:ring-1 focus:ring-pink-500 resize-y min-h-[80px] text-sm text-slate-300"
+              placeholder="e.g., Always speak in a polite tone. Never use emojis."
+              value={formData.globalInstructions || ''}
+              onChange={e => setFormData({...formData, globalInstructions: e.target.value})}
+            />
+          </div>
+
           <div className="pt-4 border-t border-slate-800">
             <h3 className="text-sm font-bold text-slate-300 mb-3">{t.model_provider}</h3>
             <select 
@@ -189,24 +297,91 @@ pause
                     value={formData.ollamaUrl}
                     onChange={e => setFormData({...formData, ollamaUrl: e.target.value})}
                   />
-                  <input 
-                    type="text" 
-                    placeholder="Model Name (llama3)"
-                    className="w-full bg-slate-800 border-none rounded-lg p-2.5"
-                    value={formData.ollamaModel}
-                    onChange={e => setFormData({...formData, ollamaModel: e.target.value})}
-                  />
+                  <div className="w-full">
+                    {isFetchingModels ? (
+                      <div className="w-full bg-slate-800 border-none rounded-lg p-2.5 text-slate-400">Loading models...</div>
+                    ) : modelFetchError ? (
+                      <div className="space-y-2">
+                        <div className="w-full bg-red-900/20 border border-red-500/50 rounded-lg p-2.5 text-red-400 text-sm">
+                          {modelFetchError}
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="Model Name (llama3)"
+                          className="w-full bg-slate-800 border-none rounded-lg p-2.5"
+                          value={formData.ollamaModel}
+                          onChange={e => setFormData({...formData, ollamaModel: e.target.value})}
+                        />
+                      </div>
+                    ) : availableModels.length > 0 ? (
+                      <select
+                        className="w-full bg-slate-800 border-none rounded-lg p-2.5 text-white"
+                        value={formData.ollamaModel}
+                        onChange={e => setFormData({...formData, ollamaModel: e.target.value})}
+                      >
+                        {availableModels.map(model => (
+                          <option key={model} value={model}>{model}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input 
+                        type="text" 
+                        placeholder="Model Name (llama3)"
+                        className="w-full bg-slate-800 border-none rounded-lg p-2.5"
+                        value={formData.ollamaModel}
+                        onChange={e => setFormData({...formData, ollamaModel: e.target.value})}
+                      />
+                    )}
+                  </div>
                 </>
               )}
 
               {formData.provider === 'lmstudio' && (
-                 <input 
+                <>
+                  <input 
                     type="text" 
                     placeholder="Endpoint (http://localhost:1234/v1)"
                     className="w-full bg-slate-800 border-none rounded-lg p-2.5"
                     value={formData.lmStudioUrl}
                     onChange={e => setFormData({...formData, lmStudioUrl: e.target.value})}
                   />
+                  <div className="w-full mt-2">
+                    {isFetchingModels ? (
+                      <div className="w-full bg-slate-800 border-none rounded-lg p-2.5 text-slate-400">Loading models...</div>
+                    ) : modelFetchError ? (
+                      <div className="space-y-2">
+                        <div className="w-full bg-red-900/20 border border-red-500/50 rounded-lg p-2.5 text-red-400 text-sm">
+                          {modelFetchError}
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="Model ID"
+                          className="w-full bg-slate-800 border-none rounded-lg p-2.5 text-white"
+                          value={formData.lmStudioModel || ''}
+                          onChange={e => setFormData({...formData, lmStudioModel: e.target.value})}
+                        />
+                      </div>
+                    ) : availableModels.length > 0 ? (
+                      <select
+                        className="w-full bg-slate-800 border-none rounded-lg p-2.5 text-white"
+                        value={formData.lmStudioModel || ''}
+                        onChange={e => setFormData({...formData, lmStudioModel: e.target.value})}
+                      >
+                        {availableModels.map(m => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input 
+                        type="text" 
+                        placeholder="Model ID (Wait for load or type manual)"
+                        className="w-full bg-slate-800 border-none rounded-lg p-2.5 text-white"
+                        value={formData.lmStudioModel || ''}
+                        onChange={e => setFormData({...formData, lmStudioModel: e.target.value})}
+                      />
+                    )}
+                  </div>
+                </>
               )}
             </div>
 
@@ -224,6 +399,39 @@ pause
                   {(t as any).download_installer}
                 </button>
               </div>
+
+                {/* ControlNet Model */}
+                <div className="flex flex-col sm:flex-row items-center justify-between p-4 bg-slate-800 rounded-xl mt-4">
+                  <div className="mb-3 sm:mb-0">
+                    <h4 className="text-white font-medium">ControlNet Canny (SDXL)</h4>
+                    <p className="text-xs text-slate-400">sai_xl_canny_256lora.safetensors (~700 MB)</p>
+                    {downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] !== undefined && (
+                      <div className="w-full bg-slate-700 rounded-full h-1.5 mt-2">
+                        <div 
+                          className={`h-1.5 rounded-full ${downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] === -1 ? 'bg-red-500' : downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`} 
+                          style={{ width: `${Math.max(0, downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'])}%` }}
+                        ></div>
+                        <span className="text-[10px] text-slate-400 mt-1 block">
+                           {downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] === 100 ? 'Installed' : 
+                            downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] === -1 ? 'Failed' : 
+                            `Downloading: ${downloadProgress['controlnet_sai_xl_canny_256lora.safetensors']}%`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => startModelDownload(
+                      'https://huggingface.co/lllyasviel/sd_control_collection/resolve/main/sai_xl_canny_256lora.safetensors',
+                      'controlnet',
+                      'sai_xl_canny_256lora.safetensors'
+                    )}
+                    disabled={downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] === 100 || (downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] > 0 && downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] < 100)}
+                    className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    {downloadProgress['controlnet_sai_xl_canny_256lora.safetensors'] === 100 ? 'Installed' : 'Download'}
+                  </button>
+                </div>
+
             </div>
           </div>
 

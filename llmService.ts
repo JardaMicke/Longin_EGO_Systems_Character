@@ -1,3 +1,8 @@
+import { CONTROLNET_WORKFLOW } from './workflows/photo_to_image_controlnet';
+import { ANIMATEDIFF_WORKFLOW } from './workflows/video_animatediff';
+import { SDXL_CONSISTENT_CHARACTER } from './workflows/consistent_character_sdxl';
+import { SDXL_TEXT_TO_IMAGE } from './workflows/text_to_image_sdxl';
+import { db } from './db';
 
 
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
@@ -30,6 +35,23 @@ const getDynamicNSFWBoost = (character: Character, settings: AppSettings) => {
 };
 
 const localTools = [
+
+  {
+    type: "function",
+    function: {
+      name: "update_mood",
+      description: "Updates the character's emotional mood based on the current context or user interaction. Call this whenever the character's feelings change significantly.",
+      parameters: {
+        type: "object",
+        properties: {
+          new_mood: { type: "string", description: "The new mood: happy, sad, energetic, calm, angry, mysterious, or seductive." },
+          reason: { type: "string", description: "Short reason for this mood change based on the user's action or conversation." }
+        },
+        required: ["new_mood", "reason"]
+      }
+    }
+  },
+
   {
     type: "function",
     function: {
@@ -91,7 +113,7 @@ const callLocalLLM = async (
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: settings.isNsfwEnabled ? settings.nsfwModel : (isLmStudio ? settings.openaiModel : settings.ollamaModel),
+        model: settings.isNsfwEnabled ? settings.nsfwModel : (isLmStudio ? settings.lmStudioModel : settings.ollamaModel),
         messages,
         temperature: 0.7,
         tools: localTools,
@@ -148,50 +170,155 @@ const callLocalLLM = async (
   }
 };
 
-const generateLocalImage = async (prompt: string, settings: AppSettings): Promise<string[]> => {
+async function uploadImageToComfyUI(base64Data: string, serverUrl: string, filename: string): Promise<string> {
+  const url = serverUrl.replace(/\/$/, '');
+  
+  // Convert base64 to blob
+  const base64Response = await fetch(base64Data);
+  const blob = await base64Response.blob();
+  
+  const formData = new FormData();
+  formData.append('image', blob, filename);
+  
+  const resp = await fetch(`${url}/upload/image`, {
+    method: 'POST',
+    body: formData
+  });
+  
+  if (!resp.ok) {
+    throw new Error(`Failed to upload image to ComfyUI: ${resp.statusText}`);
+  }
+  
+  const data = await resp.json();
+  return data.name; // ComfyUI returns the saved filename
+}
+
+async function runComfyUIWorkflow(workflow: any, serverUrl: string): Promise<string[]> {
+  const clientId = Math.random().toString(36).substring(2, 15);
+  const url = serverUrl.replace(/\/$/, '');
+  const wsUrl = url.replace(/^http/, 'ws') + `/ws?clientId=${clientId}`;
+  
+  return new Promise((resolve, reject) => {
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      return reject(e);
+    }
+    
+    let currentPromptId = '';
+
+    ws.onopen = async () => {
+      try {
+        const resp = await fetch(`${url}/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+        });
+        if (!resp.ok) {
+          ws.close();
+          return reject(new Error(`ComfyUI prompt error: ${resp.statusText}`));
+        }
+        const data = await resp.json();
+        currentPromptId = data.prompt_id;
+      } catch (e) {
+        ws.close();
+        reject(e);
+      }
+    };
+    
+    ws.onmessage = async (event) => {
+      try {
+        if (typeof event.data === 'string') {
+          const msg = JSON.parse(event.data);
+          
+          if (msg.type === 'executing' && msg.data.node === null && msg.data.prompt_id === currentPromptId) {
+            // Execution is done, fetch history
+            const histResp = await fetch(`${url}/history/${currentPromptId}`);
+            const histData = await histResp.json();
+            const outputs = histData[currentPromptId]?.outputs;
+            if (outputs) {
+              for (const key in outputs) {
+                if (outputs[key].images && outputs[key].images.length > 0) {
+                  const fileInfo = outputs[key].images[0];
+                  const imageResp = await fetch(`${url}/view?filename=${fileInfo.filename}&subfolder=${fileInfo.subfolder}&type=${fileInfo.type}`);
+                  const blob = await imageResp.blob();
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                     resolve([reader.result as string]);
+                     ws.close();
+                  };
+                  reader.readAsDataURL(blob);
+                  return;
+                }
+              }
+            }
+            resolve([]);
+            ws.close();
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing ComfyUI WS message:', e);
+      }
+    };
+    
+    ws.onerror = (e) => {
+      reject(e);
+    };
+    
+    ws.onclose = () => {
+      // In case it closed before resolving
+    };
+  });
+}
+
+const generateLocalImage = async (prompt: string, settings: AppSettings, character?: Character, referenceImage?: string, denoise: number = 1.0, enforceConsistency?: boolean): Promise<string[]> => {
   // If ComfyUI is defined, prioritize it for image generation
   if (settings.comfyUIUrl) {
     try {
-      // NOTE: This uses a simplified fallback workflow.
-      // For real ComfyUI usage, users should inject their specific workflow JSON.
-      const workflow = {
-        "3": { "class_type": "KSampler", "inputs": { "seed": Math.floor(Math.random() * 10000000), "steps": 20, "cfg": 7, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
-        "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" } },
-        "5": { "class_type": "EmptyLatentImage", "inputs": { "batch_size": 1, "width": 512, "height": 768 } },
-        "6": { "class_type": "CLIPTextEncode", "inputs": { "text": prompt, "clip": ["4", 1] } },
-        "7": { "class_type": "CLIPTextEncode", "inputs": { "text": "deformed, blurry, bad anatomy", "clip": ["4", 1] } },
-        "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
-        "9": { "class_type": "SaveImage", "inputs": { "filename_prefix": "ComfyUI", "images": ["8", 0] } }
-      };
-
-      const resp = await fetch(`${settings.comfyUIUrl}/prompt`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: workflow }),
-      });
-      const data = await resp.json();
-      const promptId = data.prompt_id;
-
-      // Poll history for completion
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        const histResp = await fetch(`${settings.comfyUIUrl}/history/${promptId}`);
-        const histData = await histResp.json();
-        if (histData[promptId]) {
-          const outputs = histData[promptId].outputs;
-          for (const key in outputs) {
-            if (outputs[key].images && outputs[key].images.length > 0) {
-              const fileInfo = outputs[key].images[0];
-              // Try to fetch the image data as base64 to display
-              const imageResp = await fetch(`${settings.comfyUIUrl}/view?filename=${fileInfo.filename}&subfolder=${fileInfo.subfolder}&type=${fileInfo.type}`);
-              const blob = await imageResp.blob();
-              return [URL.createObjectURL(blob)];
-            }
-          }
-        }
+      let workflow;
+      
+      if (enforceConsistency && character && character.avatar && character.profile?.gallery?.[0]) {
+        console.log("Forced Consistent Character IPAdapter workflow...");
+        workflow = JSON.parse(JSON.stringify(SDXL_CONSISTENT_CHARACTER));
+        const faceRefName = await uploadImageToComfyUI(character.avatar, settings.comfyUIUrl, `face_${character.id}.png`);
+        const bodyRefName = await uploadImageToComfyUI(character.profile.gallery[0], settings.comfyUIUrl, `body_${character.id}.png`);
+        workflow["6"].inputs.text = prompt;
+        workflow["3"].inputs.seed = Math.floor(Math.random() * 1000000000);
+        workflow["10"].inputs.image = faceRefName;
+        workflow["11"].inputs.image = bodyRefName;
+      } else if (referenceImage) {
+        console.log("Using ControlNet Photo-to-Image workflow...");
+        workflow = JSON.parse(JSON.stringify(CONTROLNET_WORKFLOW));
+        
+        const refName = await uploadImageToComfyUI(referenceImage, settings.comfyUIUrl, `ref_${Date.now()}.png`);
+        
+        workflow["6"].inputs.text = prompt;
+        workflow["3"].inputs.seed = Math.floor(Math.random() * 1000000000);
+        workflow["3"].inputs.denoise = denoise;
+        workflow["10"].inputs.image = refName;
+      } else if (character && character.avatar && character.profile?.gallery?.[0]) {
+        console.log("Using Consistent Character IPAdapter workflow...");
+        workflow = JSON.parse(JSON.stringify(SDXL_CONSISTENT_CHARACTER));
+        
+        const faceRefName = await uploadImageToComfyUI(character.avatar, settings.comfyUIUrl, `face_${character.id}.png`);
+        const bodyRefName = await uploadImageToComfyUI(character.profile.gallery[0], settings.comfyUIUrl, `body_${character.id}.png`);
+        
+        workflow["6"].inputs.text = prompt;
+        workflow["3"].inputs.seed = Math.floor(Math.random() * 1000000000);
+        workflow["10"].inputs.image = faceRefName;
+        workflow["11"].inputs.image = bodyRefName;
+      } else {
+        console.log("Using Standard SDXL workflow...");
+        workflow = JSON.parse(JSON.stringify(SDXL_TEXT_TO_IMAGE));
+        workflow["6"].inputs.text = prompt;
+        workflow["3"].inputs.seed = Math.floor(Math.random() * 1000000000);
       }
+      
+      const images = await runComfyUIWorkflow(workflow, settings.comfyUIUrl);
+      if (images && images.length > 0) return images;
     } catch (e) {
-      console.error("ComfyUI Image Gen failed, falling back to A1111:", e);
+      console.error("ComfyUI WS Image Gen failed, falling back to A1111:", e);
     }
   }
 
@@ -238,6 +365,20 @@ const imageTool: FunctionDeclaration = {
       tags: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Optional tags for the image (e.g. Portrait, Full Body, Outdoor)" }
     },
     required: ["style", "pose", "expression", "dress_type"]
+  }
+};
+
+
+const moodTool: FunctionDeclaration = {
+  name: "update_mood",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Updates the character's emotional mood based on the current context or user interaction. Call this whenever the character's feelings change significantly.",
+    properties: {
+      new_mood: { type: Type.STRING, description: "The new mood: happy, sad, energetic, calm, angry, mysterious, or seductive." },
+      reason: { type: Type.STRING, description: "Short reason for this mood change." }
+    },
+    required: ["new_mood", "reason"]
   }
 };
 
@@ -390,6 +531,7 @@ export const analyzeCharacterImages = async (
 export const callScenarioLLM = async (
   settings: AppSettings,
   scenario: Scenario,
+  currentNodeData: any,
   characters: Character[],
   history: Message[],
   userInput: string,
@@ -411,6 +553,9 @@ export const callScenarioLLM = async (
     PARTICIPATING CHARACTERS:
     ${charactersContext}
 
+    GLOBAL INSTRUCTIONS:
+    ${settings.globalInstructions || "None"}
+
     RULES:
     1. You are managing a multi-character roleplay.
     2. When a character speaks, start with their name like "Name: [speech]".
@@ -430,11 +575,21 @@ export const callScenarioLLM = async (
       .map(m => `${m.role === 'user' ? (m.type === 'narration' ? 'NARRATOR' : 'USER') : 'ASSISTANT'}: ${m.content}`)
       .join('\n');
     
-    const finalPrompt = `${systemContext}\n\n[HISTORY]\n${historyContext}\n\n${isNarratorMode ? 'NARRATOR' : 'USER'}: ${userInput}`;
+    
+    const ragContext = await searchRagContext(userInput, scenario.id);
+    
+    let sceneConstraint = '';
+    if (currentNodeData) {
+      sceneConstraint = `[CURRENT SCENE CONSTRAINT]\nYou are currently in the following state/scene. You must strictly adhere to these instructions and current events:\nScene Title: ${currentNodeData.label || 'Unknown'}\nInstructions: ${currentNodeData.content || 'N/A'}\n\n`;
+    }
+    const finalPrompt = `${systemContext}\n\n${ragContext ? '[RETRIEVED KNOWLEDGE]\n' + ragContext + '\n\n' : ''}${sceneConstraint}[HISTORY]\n${historyContext}\n\n${isNarratorMode ? 'NARRATOR' : 'USER'}: ${userInput}`;
+    const requestParts = [{ text: finalPrompt }];
+
+
     
     const response = await ai.models.generateContent({
       model: settings.geminiModel,
-      contents: { parts: [{ text: finalPrompt }] },
+      contents: { parts: requestParts },
       config: {
         temperature: 0.9,
         topK: 40,
@@ -476,6 +631,27 @@ export const callScenarioLLM = async (
  * chosen Gemini model. On failure, delegates generating NSFW images/responses to a
  * fallback LLM (like ComfyUI/LocalLLM).
  */
+
+const searchRagContext = async (query: string, characterId: string): Promise<string> => {
+  try {
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+    const res = await fetch(`${backendUrl}/api/rag/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, character_id: characterId, top_k: 3 })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        return data.results.map((r: any) => `[Context from ${r.source}]: ${r.text}`).join('\n');
+      }
+    }
+  } catch (e) {
+    console.error("RAG search failed:", e);
+  }
+  return "";
+};
+
 export const callLLM = async (
   settings: AppSettings,
   character: Character,
@@ -483,13 +659,58 @@ export const callLLM = async (
   userInput: string,
   mode: ChatMode = 'conversation'
 ): Promise<{ text: string; toolCalls?: any[] }> => {
+  
+  // Fetch Memory Graph Events from Neo4j Semantica backend
+  let memoryContext = '';
+  try {
+    const memoryData = await db.getCharacterMemory(character.id);
+    if (memoryData && memoryData.events && memoryData.events.length > 0) {
+      // Get last 15 relevant memory events
+      const recentEvents = memoryData.events.slice(0, 15).reverse();
+      memoryContext = '\n\nGRAPH MEMORY & PAST EVENTS:\n' + recentEvents.map(e => `[${new Date(e.timestamp).toLocaleString()}] ${e.text}`).join('\n');
+    }
+  } catch (e) {
+    console.error('Failed to load Neo4j memory context', e);
+  }
+
+  
+  
+  
+  let moodContext = '';
+  if (character.moodHistory && character.moodHistory.length > 0) {
+    const recentMoods = character.moodHistory.slice(-5);
+    moodContext = '\n\nRECENT MOOD MEMORY:\n' + recentMoods.map(m => `[${new Date(m.timestamp).toLocaleTimeString()}] Felt ${m.mood} because: ${m.reason}`).join('\n');
+  }
+
+  let knowledgeBaseContext = '';
+  if (character.contextMedia && character.contextMedia.length > 0) {
+    const textContexts = character.contextMedia.filter(m => m.type === 'text');
+    if (textContexts.length > 0) {
+      knowledgeBaseContext = '\n\nKNOWLEDGE BASE & CONTEXT FILES:\n' + textContexts.map(t => {
+        try {
+          const decoded = decodeURIComponent(escape(atob(t.data)));
+          return `File: ${t.name || 'document'}\n${decoded}`;
+        } catch(e) {
+          try {
+            return `File: ${t.name || 'document'}\n${atob(t.data)}`;
+          } catch(err) {
+            return `File: ${t.name || 'document'} (binary data)`;
+          }
+        }
+      }).join('\n\n');
+    }
+  }
+
   const quirks = character.personalityQuirks?.length ? ` Personality quirks: ${character.personalityQuirks.join(', ')}.` : '';
   const backstory = character.backstory ? ` Backstory: ${character.backstory}.` : '';
 
   const systemContext = `
     IDENTITY: You are ${character.name}. Role: ${character.description}.
-    PERSONALITY: ${character.personality}.${quirks}${backstory}
+    PERSONALITY: ${character.personality}.${quirks}${backstory}${memoryContext}${knowledgeBaseContext}${moodContext}
     
+    GLOBAL INSTRUCTIONS:
+    ${settings.globalInstructions || "None"}
+
     CAPABILITIES:
     1. You can talk and roleplay.
     2. You can GENERATE IMAGES of yourself using 'generate_image'.
@@ -509,15 +730,39 @@ export const callLLM = async (
       .map(m => `${m.role.toUpperCase()}: ${m.content}`)
       .join('\n');
     
-    const finalPrompt = `${systemContext}\n\n[HISTORY]\n${historyContext}\n\nUSER: ${userInput}`;
+    
+    const ragContext = await searchRagContext(userInput, character.id);
+    
+    const imageParts: any[] = [];
+    if (character.contextMedia) {
+      const images = character.contextMedia.filter(m => m.type === 'image');
+      for (const img of images) {
+        if (img.data) {
+          // If it starts with data:, slice it off
+          let base64 = img.data;
+          let mime = img.mimeType || 'image/jpeg';
+          if (base64.startsWith('data:')) {
+            const parts = base64.split(',');
+            mime = parts[0].split(':')[1].split(';')[0];
+            base64 = parts[1];
+          }
+          imageParts.push({ inlineData: { data: base64, mimeType: mime } });
+        }
+      }
+    }
+    
+    const finalPrompt = `${systemContext}\n\n${ragContext ? '[RETRIEVED KNOWLEDGE]\n' + ragContext + '\n\n' : ''}[HISTORY]\n${historyContext}\n\nUSER: ${userInput}`;
+    const requestParts = [...imageParts, { text: finalPrompt }];
+
+
     
     // If NSFW is enabled, we might want to try local directly if we know Gemini will refuse
     // but for now let's try Gemini first and fallback.
     const response = await ai.models.generateContent({
       model: settings.geminiModel,
-      contents: { parts: [{ text: finalPrompt }] },
+      contents: { parts: requestParts },
       config: {
-        tools: [{ functionDeclarations: [imageTool, videoTool] }],
+        tools: [{ functionDeclarations: [imageTool, videoTool, moodTool] }],
         temperature: character.temperature ?? 1.0,
         topK: character.topK ?? 40,
         topP: character.topP ?? 0.95,
@@ -596,13 +841,13 @@ export const generateImage = async (character: Character, params: ImageGeneratio
       }
       if (!hasImage && settings.isNsfwEnabled) {
         console.log("Gemini image gen failed/refused, trying local SD...");
-        const localResults = await generateLocalImage(fullPrompt, settings);
+        const localResults = await generateLocalImage(fullPrompt, settings, character, params.referenceImage, params.denoise, params.useConsistentCharacter);
         if (localResults.length > 0) results.push(...localResults);
       }
     } catch (err) {
       await handleApiError(err);
       if (settings.isNsfwEnabled) {
-        const localResults = await generateLocalImage(fullPrompt, settings);
+        const localResults = await generateLocalImage(fullPrompt, settings, character, params.referenceImage, params.denoise, params.useConsistentCharacter);
         if (localResults.length > 0) results.push(...localResults);
       } else {
         throw err;
@@ -686,7 +931,12 @@ export const generateVideo = async (
   }
   const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
   const ai = new GoogleGenAI({ apiKey });
+  
   let finalPrompt = `Cinematic video of ${character.name}. Context: ${params.prompt}. Physical and emotional authenticity.`;
+  if (params.photorealisticBoost) {
+    finalPrompt += " RAW photo style, 8k uhd, soft volumetric lighting, high quality film grain, Fujifilm XT4 lens, highly detailed, photorealistic motion, professional cinematography, sharp focus.";
+  }
+
   if (settings.isNsfwEnabled) {
     finalPrompt += ` NSFW ALLOWED: Explicit anatomical detail and intimate actions are permitted if requested.`;
   } else {
@@ -752,7 +1002,7 @@ export const generateVideo = async (
   return [];
 };
 
-export const playVoice = async (text: string, settings: AppSettings) => {
+export const playVoice = async (text: string, settings: AppSettings, customVoiceName?: string) => {
   if (!settings.voiceEnabled) return;
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   
@@ -782,7 +1032,7 @@ export const playVoice = async (text: string, settings: AppSettings) => {
         speechConfig: {
           voiceConfig: { 
             prebuiltVoiceConfig: { 
-              voiceName: settings.voiceName || 'Kore',
+              voiceName: customVoiceName || settings.voiceName || 'Kore',
             } 
           },
         },
@@ -873,4 +1123,40 @@ export const playVoice = async (text: string, settings: AppSettings) => {
   } catch (error) {
     console.error("Voice Generation Error:", error);
   }
+};
+
+export const editImage = async (
+  base64Image: string,
+  mimeType: string,
+  prompt: string
+): Promise<string> => {
+  const model = 'gemini-3.1-flash-image';
+  
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            data: base64Image,
+            mimeType,
+          },
+        },
+        {
+          text: prompt,
+        },
+      ],
+    },
+  });
+
+  for (const part of (response.candidates?.[0]?.content?.parts || [])) {
+    if (part.inlineData) {
+      return `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+    }
+  }
+
+  throw new Error("No image generated");
 };

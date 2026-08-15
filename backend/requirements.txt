@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+neo4j
+semantica[graph-neo4j]
+PyPDF2
+python-multipart
+sentence-transformers

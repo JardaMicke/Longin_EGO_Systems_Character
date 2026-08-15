@@ -1,9 +1,9 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Character, BodySpecs, FaceSpecs, AppLanguage, CharacterMood } from '../types';
+import { Character, BodySpecs, FaceSpecs, AppLanguage, CharacterMood, ContextMedia } from '../types';
 import { translations } from '../locales';
-import { refineSystemPrompt, analyzeCharacterImages } from '../llmService';
+import { refineSystemPrompt, analyzeCharacterImages, playVoice } from '../llmService';
 import { db } from '../db';
 
 interface CreatorProps {
@@ -150,6 +150,7 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
   const [description, setDescription] = useState('');
   const [personality, setPersonality] = useState('');
   const [mood, setMood] = useState<CharacterMood>('calm');
+  const [voiceName, setVoiceName] = useState('Kore');
   const [greeting, setGreeting] = useState('');
   const [visualTraits, setVisualTraits] = useState('');
   const [backstory, setBackstory] = useState('');
@@ -162,7 +163,7 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
   const [hoveredSpec, setHoveredSpec] = useState<string | null>(null);
   const [isRefining, setIsRefining] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [uploadedPhotos, setUploadedPhotos] = useState<{data: string, mimeType: string}[]>([]);
+  const [contextMedia, setContextMedia] = useState<ContextMedia[]>([]);
   
   // Sampling Parameters
   const [temperature, setTemperature] = useState(1.0);
@@ -239,15 +240,26 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const newPhotos: {data: string, mimeType: string}[] = [];
+      const newMedia: ContextMedia[] = [];
       Array.from(e.target.files).forEach((file: File) => {
         const reader = new FileReader();
         reader.onload = (evt) => {
           const result = evt.target?.result as string;
-          const base64 = result.split(',')[1];
-          newPhotos.push({ data: base64, mimeType: file.type });
-          if (newPhotos.length === e.target.files!.length) {
-            setUploadedPhotos(prev => [...prev, ...newPhotos]);
+          let base64 = result;
+          if (result.includes(',')) base64 = result.split(',')[1];
+          let type: 'image' | 'video' | 'text' = 'text';
+          if (file.type.startsWith('image/')) type = 'image';
+          else if (file.type.startsWith('video/')) type = 'video';
+          
+          newMedia.push({ 
+            id: Date.now().toString() + Math.random().toString(),
+            type, 
+            data: base64, 
+            mimeType: file.type,
+            name: file.name
+          });
+          if (newMedia.length === e.target.files!.length) {
+            setContextMedia(prev => [...prev, ...newMedia]);
           }
         };
         reader.readAsDataURL(file);
@@ -255,12 +267,17 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
     }
   };
 
+  const removeMedia = (id: string) => {
+    setContextMedia(prev => prev.filter(m => m.id !== id));
+  };
+
   const handleAnalyzePhotos = async () => {
-    if (uploadedPhotos.length === 0) return;
+    const images = contextMedia.filter(m => m.type === 'image');
+    if (images.length === 0) return;
     setIsAnalyzing(true);
     try {
       // Create inlineData objects for Gemini
-      const imageParts = uploadedPhotos.map(p => ({
+      const imageParts = images.map(p => ({
         inlineData: { data: p.data, mimeType: p.mimeType }
       }));
       
@@ -279,8 +296,8 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
       }
       
       // Set the first uploaded photo as avatar if available
-      if (uploadedPhotos.length > 0) {
-         setAvatar(`data:${uploadedPhotos[0].mimeType};base64,${uploadedPhotos[0].data}`);
+      if (images.length > 0) {
+         setAvatar(`data:${images[0].mimeType};base64,${images[0].data}`);
       }
 
     } catch (error) {
@@ -344,12 +361,14 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
       personality,
       mood,
       greeting,
+      voiceName,
       visualTraits: `${visualTraits}. ${bodyPrompt} ${facePrompt}`,
       backstory: backstory,
       personalityQuirks: quirks,
       bodySpecs: body,
       faceSpecs: face,
       tags: tags,
+      contextMedia,
       systemPrompt: systemPrompt || `You are ${name}. Personality: ${personality}. Current Mood: ${mood}. Quirks: ${quirks.join(', ')}. Backstory: ${backstory}. Role: ${description}. Visual Traits: ${visualTraits}. ${bodyPrompt} ${facePrompt}. Always act as a high-end AI companion.`,
       temperature,
       topK,
@@ -406,8 +425,9 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
                 <button 
                   type="button" 
                   onClick={() => {
-                    const canvas = document.getElementById('character-canvas') as HTMLCanvasElement;
-                    if (canvas) {
+                    const canvasElement = document.getElementById('character-canvas');
+                    const canvas = (canvasElement?.tagName === 'CANVAS' ? canvasElement : canvasElement?.querySelector('canvas')) as HTMLCanvasElement;
+                    if (canvas && typeof canvas.toDataURL === 'function') {
                       setAvatar(canvas.toDataURL('image/png'));
                       const traitsToAppend = `3D Model Base - Height: ${body.height}cm, Chest/Shoulders: ${body.chest}/${body.shoulders}, Facial Roundness: ${face.roundness}, Eye/Lip Size: ${face.eyeSize}/${face.lipsSize}`;
                       if (!visualTraits.includes('3D Model Base')) {
@@ -496,17 +516,23 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
               </div>
             )}
 
-            {/* Photo Analysis Dropzone (Always visible in Basic or Advanced, or separate?) Placed in Basic. */}
+            
             {activeTab === 'basic' && (
-              <div className="mb-8">
+              <div className="space-y-8 animate-in fade-in slide-in-from-right-8 duration-500">
+
+              <div className="mb-8 bg-white/5 border border-white/10 rounded-[2rem] p-6">
+                 <h3 className="text-sm font-black uppercase tracking-widest text-white mb-4">{(t as any).context_gallery || 'Kontext a Galerie'}</h3>
+                 <p className="text-xs text-slate-400 mb-6">
+                   {(t as any).context_gallery_hint || 'Přiložte fotografie, videa nebo textové dokumenty. Čím více kontextu, tím lépe bude AI charakter chápat.'}
+                 </p>
                  <div 
                    onClick={() => photoUploadRef.current?.click()}
-                   className="border-2 border-dashed border-white/10 rounded-[2rem] p-6 hover:border-pink-500/50 hover:bg-white/5 transition-all cursor-pointer group text-center"
+                   className="border-2 border-dashed border-white/10 rounded-[1.5rem] p-6 hover:border-pink-500/50 hover:bg-white/5 transition-all cursor-pointer group text-center"
                  >
                     <input 
                       type="file" 
                       multiple 
-                      accept="image/*" 
+                      accept="image/*,video/*,text/plain" 
                       ref={photoUploadRef} 
                       className="hidden" 
                       onChange={handlePhotoUpload}
@@ -516,36 +542,61 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
                         {isAnalyzing ? (
                           <div className="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
                         ) : (
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                         )}
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-white group-hover:text-pink-400 transition-colors">{t.upload_photos}</p>
-                        <p className="text-xs text-slate-500 mt-1">{t.photos_hint}</p>
+                        <p className="text-sm font-bold text-white group-hover:text-pink-400 transition-colors">Přidat soubory</p>
                       </div>
                     </div>
                  </div>
                  
-                 {uploadedPhotos.length > 0 && (
-                   <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
-                     {uploadedPhotos.map((photo, i) => (
-                       <img key={i} src={`data:${photo.mimeType};base64,${photo.data}`} className="w-16 h-16 rounded-xl object-cover border border-white/10" alt="uploaded" />
-                     ))}
+                 {contextMedia.length > 0 && (
+                   <div className="mt-6 space-y-4">
+                     <div className="flex gap-2 mt-4 overflow-x-auto pb-2 custom-scrollbar">
+                       {contextMedia.map((media) => (
+                         <div key={media.id} className="relative group/media shrink-0">
+                           {media.type === 'image' && (
+                             <img src={media.data.startsWith('data:') ? media.data : `data:${media.mimeType};base64,${media.data}`} className="w-24 h-24 rounded-xl object-cover border border-white/10" alt="uploaded" />
+                           )}
+                           {media.type === 'video' && (
+                             <div className="w-24 h-24 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center">
+                               <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                             </div>
+                           )}
+                           {media.type === 'text' && (
+                             <div className="w-24 h-24 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center flex-col p-2 text-center overflow-hidden">
+                               <svg className="w-6 h-6 text-slate-500 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                               <span className="text-[8px] text-slate-400 break-all line-clamp-2">{media.name || 'Text'}</span>
+                             </div>
+                           )}
+                           <button 
+                             type="button"
+                             onClick={() => removeMedia(media.id)}
+                             className="absolute -top-2 -right-2 w-6 h-6 bg-rose-600 rounded-full flex items-center justify-center opacity-0 group-hover/media:opacity-100 transition-opacity text-white hover:bg-rose-500 shadow-lg"
+                           >
+                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                           </button>
+                         </div>
+                       ))}
+                     </div>
                      <button 
                        type="button" 
                        onClick={handleAnalyzePhotos}
-                       disabled={isAnalyzing}
-                       className="px-6 bg-pink-600 hover:bg-pink-500 rounded-xl text-xs font-black text-white uppercase tracking-widest transition-all disabled:opacity-50"
+                       disabled={isAnalyzing || !contextMedia.some(m => m.type === 'image')}
+                       className="w-full px-6 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold uppercase tracking-widest text-pink-500 transition-all border border-white/5 disabled:opacity-50 flex items-center justify-center gap-2"
                      >
-                       {isAnalyzing ? t.analyzing : t.analyze_photos}
+                       {isAnalyzing ? (
+                         <div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
+                       ) : (
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                       )}
+                       {t.analyze_photos}
                      </button>
                    </div>
                  )}
               </div>
-            )}
 
-            {activeTab === 'basic' && (
-              <div className="space-y-8 animate-in fade-in slide-in-from-right-8 duration-500">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-3">
                     <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 ml-1">{t.name}</label>
@@ -605,6 +656,54 @@ export const CharacterCreator: React.FC<CreatorProps> = ({ onSave, onClose, lang
                       >
                         {(t as any)[`mood_${m}`]}
                       </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between ml-1">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Hlasová Galerie (Voice Gallery)</label>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-pink-500/70">Zvolte hlas postavy</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {[
+                      { id: 'Kore', name: 'Kore', desc: 'Ženský, Neutrální', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z', color: 'from-emerald-500/20 to-emerald-900/20', border: 'border-emerald-500/30' },
+                      { id: 'Aoede', name: 'Aoede', desc: 'Ženský, Jemný', icon: 'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z', color: 'from-pink-500/20 to-pink-900/20', border: 'border-pink-500/30' },
+                      { id: 'Puck', name: 'Puck', desc: 'Chlapecký, Energický', icon: 'M13 10V3L4 14h7v7l9-11h-7z', color: 'from-amber-500/20 to-amber-900/20', border: 'border-amber-500/30' },
+                      { id: 'Charon', name: 'Charon', desc: 'Mužský, Hluboký', icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9', color: 'from-indigo-500/20 to-indigo-900/20', border: 'border-indigo-500/30' },
+                      { id: 'Fenrir', name: 'Fenrir', desc: 'Mužský, Drsný', icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z', color: 'from-red-500/20 to-red-900/20', border: 'border-red-500/30' }
+                    ].map(voice => (
+                      <div 
+                        key={voice.id}
+                        onClick={() => setVoiceName(voice.id)}
+                        className={`relative group cursor-pointer overflow-hidden rounded-[1.5rem] border transition-all duration-300 p-4 flex items-center justify-between ${
+                          voiceName === voice.id 
+                            ? 'bg-gradient-to-br border-pink-500 shadow-[0_0_20px_rgba(236,72,153,0.15)] ' + voice.color 
+                            : 'bg-white/5 border-white/5 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-4 relative z-10">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center bg-black/40 border ${voiceName === voice.id ? voice.border : 'border-white/10'}`}>
+                            <svg className={`w-5 h-5 ${voiceName === voice.id ? 'text-white' : 'text-white/40'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={voice.icon} /></svg>
+                          </div>
+                          <div>
+                            <div className={`font-bold text-sm transition-colors ${voiceName === voice.id ? 'text-white' : 'text-slate-300'}`}>{voice.name}</div>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-0.5">{voice.desc}</div>
+                          </div>
+                        </div>
+                        
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playVoice('Ahoj, takhle zní můj hlas. Doufám, že se ti líbí!', { voiceEnabled: true } as any, voice.id);
+                          }}
+                          className={`p-3 rounded-full transition-all z-10 ${voiceName === voice.id ? 'bg-pink-500 text-white shadow-lg shadow-pink-900/50 hover:scale-110' : 'bg-black/40 text-slate-400 hover:text-white hover:bg-white/10'}`}
+                          title="Preview Voice"
+                        >
+                          <svg className="w-4 h-4 translate-x-[1px]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>

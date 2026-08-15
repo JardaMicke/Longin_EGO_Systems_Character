@@ -3,7 +3,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Character, Message, ChatMode, AppLanguage, Scenario } from '../types';
 import { translations } from '../locales';
 
+import { ImageViewer } from './ImageViewer';
+
 interface ChatWindowProps {
+  onMenuClick?: () => void;
   character: Character;
   scenario?: Scenario;
   messages: Message[];
@@ -17,9 +20,14 @@ interface ChatWindowProps {
   onToggleNarrator: () => void;
   isTyping: boolean;
   statusMessage?: string;
+  currentNodeId?: string;
+  onNodeTransition?: (nodeId: string) => void;
+  onMoodChange?: (mood: 'happy' | 'sad' | 'energetic' | 'calm' | 'angry' | 'mysterious' | 'seductive', reason: string) => void;
+  isVoiceEnabled?: boolean;
+  onToggleVoice?: () => void;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ 
+export const ChatWindow: React.FC<ChatWindowProps> = ({ onMenuClick, 
   character, 
   scenario,
   messages, 
@@ -32,11 +40,35 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onToggleMode,
   onToggleNarrator,
   isTyping,
-  statusMessage
+  statusMessage,
+  onNodeTransition,
+  onMoodChange,
+  isVoiceEnabled,
+  onToggleVoice
 }) => {
   const [input, setInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [searchTag, setSearchTag] = useState('');
+  const [showMoodPanel, setShowMoodPanel] = useState(false);
+  const [customMoodReason, setCustomMoodReason] = useState('');
   const currentMood = character.mood || 'happy';
+
+  const getMoodOverlay = (mood: string) => {
+    switch (mood) {
+      case 'happy': return 'bg-yellow-400/40 shadow-[inset_0_0_15px_rgba(250,204,21,0.5)]';
+      case 'sad': return 'bg-blue-500/40 shadow-[inset_0_0_15px_rgba(59,130,246,0.5)]';
+      case 'energetic': return 'bg-orange-500/40 shadow-[inset_0_0_15px_rgba(249,115,22,0.5)] animate-pulse';
+      case 'calm': return 'bg-teal-400/40 shadow-[inset_0_0_15px_rgba(45,212,191,0.5)]';
+      case 'angry': return 'bg-red-500/50 shadow-[inset_0_0_15px_rgba(239,68,68,0.7)] animate-pulse';
+      case 'mysterious': return 'bg-purple-500/40 shadow-[inset_0_0_15px_rgba(168,85,247,0.5)]';
+      case 'seductive': return 'bg-rose-500/40 shadow-[inset_0_0_15px_rgba(244,63,94,0.5)]';
+      default: return 'bg-white/10';
+    }
+  };
+  const moodOverlay = getMoodOverlay(currentMood);
+
   const idleAnim = isTyping ? 'animate-pulse' : `animate-idle-${currentMood}`;
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = translations[language];
@@ -47,6 +79,52 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   }, [messages, isTyping, statusMessage]);
 
+  
+  useEffect(() => {
+    // Initialize speech recognition
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = language === 'cs' ? 'cs-CZ' : 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      
+      recognition.onresult = (event: any) => {
+        let currentTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          currentTranscript += event.results[i][0].transcript;
+        }
+        setInput(prev => {
+           // We might want to just set it or append it. Setting is safer for interim.
+           // However, for interim results it's better to maintain a separate state or just overwrite.
+           return currentTranscript;
+        });
+      };
+      
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        setIsRecording(false);
+      };
+      
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+      
+      recognitionRef.current = recognition;
+    }
+  }, [language]);
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      setInput(''); // clear before starting
+      recognitionRef.current?.start();
+      setIsRecording(true);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isTyping) return;
@@ -54,21 +132,85 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     setInput('');
   };
 
-  return (
+  
+      {viewingImage && (
+        <ImageViewer src={viewingImage} onClose={() => setViewingImage(null)} />
+      )}
+return (
     <div className={`flex-1 flex flex-col h-full relative overflow-hidden transition-colors duration-700 ${currentMode === 'scenario' ? 'bg-[#0a060a]' : 'bg-[#050505]'}`}>
       {/* Dynamic Background Glow */}
       <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] pointer-events-none opacity-40 blur-[100px] transition-all duration-1000 ${currentMode === 'scenario' ? 'bg-violet-900/30' : 'bg-pink-500/20'}`}></div>
 
       {/* Header */}
       <div className="h-20 border-b border-white/5 flex items-center px-8 gap-5 bg-black/40 backdrop-blur-xl z-10">
-        <div className="relative group cursor-pointer">
+        <button onClick={onMenuClick} className="md:hidden p-2 -ml-4 mr-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg></button>
+        <div className="relative group cursor-pointer w-12 h-12" onClick={() => setShowMoodPanel(!showMoodPanel)}>
           <img 
             src={character.avatar || undefined} 
             alt={character.name} 
-            className={`w-12 h-12 rounded-full object-cover ring-2 ring-pink-500/30 transition-all group-hover:ring-pink-500 shadow-xl ${idleAnim}`} 
+            className={`w-full h-full rounded-full object-cover ring-2 ring-pink-500/30 transition-all group-hover:ring-pink-500 shadow-xl ${idleAnim}`} 
           />
+          <div className={`absolute inset-0 rounded-full mix-blend-overlay pointer-events-none transition-all duration-1000 ${moodOverlay}`}></div>
           <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 border-2 border-black rounded-full"></div>
         </div>
+
+        {/* Mood Panel */}
+        {showMoodPanel && (
+          <div className="absolute top-20 left-8 w-80 bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-4 shadow-2xl z-50 animate-in fade-in slide-in-from-top-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-white text-sm">Aktuální nálada: <span className="capitalize text-pink-400">{currentMood}</span></h3>
+              <button onClick={() => setShowMoodPanel(false)} className="text-slate-500 hover:text-white p-1">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Manuální změna nálady</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {['happy', 'sad', 'energetic', 'calm', 'angry', 'mysterious', 'seductive'].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        if (onMoodChange) onMoodChange(m as any, customMoodReason || 'Manuálně změněno uživatelem');
+                        setShowMoodPanel(false);
+                        setCustomMoodReason('');
+                      }}
+                      className={`text-xs font-bold py-1.5 rounded-lg border transition-all capitalize ${currentMood === m ? 'bg-pink-500/20 border-pink-500 text-pink-300' : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                <input 
+                  type="text" 
+                  placeholder="Důvod změny (volitelné)"
+                  value={customMoodReason}
+                  onChange={(e) => setCustomMoodReason(e.target.value)}
+                  className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-pink-500/50"
+                />
+              </div>
+
+              {character.moodHistory && character.moodHistory.length > 0 && (
+                <div className="border-t border-white/10 pt-4">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Historie nálad</p>
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                    {[...character.moodHistory].reverse().map((mem, idx) => (
+                      <div key={idx} className="bg-black/40 rounded p-2 text-xs border border-white/5">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-pink-400 capitalize">{mem.mood}</span>
+                          <span className="text-[9px] text-slate-500">{new Date(mem.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <p className="text-slate-300 leading-tight">{mem.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 flex items-center gap-4">
           <div>
             <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
@@ -154,7 +296,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
         {messages.filter(m => !searchTag || (m.tags && m.tags.some(t => t.toLowerCase().includes(searchTag.toLowerCase())))).map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-500`}>
-            {msg.type === 'narration' ? (
+            
+            {msg.role === 'system' ? (
+              <div className="w-full flex justify-center py-4">
+                 <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl px-4 py-2 text-center shadow-inner flex items-center gap-2">
+                    <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">{msg.content}</span>
+                 </div>
+              </div>
+            ) : msg.type === 'narration' ? (
+
               <div className="w-full flex justify-center py-6">
                  <div className="max-w-2xl bg-violet-950/20 border border-violet-500/10 rounded-3xl p-6 text-center shadow-inner relative group">
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-violet-600 text-[8px] font-black px-3 py-1 rounded-full text-white uppercase tracking-[0.2em] shadow-lg">{t.narrator}</div>
@@ -171,7 +322,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               }`}>
                 {msg.type === 'image' && (
                   <div className="rounded-2xl overflow-hidden mb-4 border border-white/10 group-hover:scale-[1.02] transition-transform duration-500 relative">
-                    <img src={msg.content || undefined} alt="moment" className="w-full h-auto object-cover max-h-[600px]" />
+                    <img src={msg.content || undefined} alt="moment" onClick={() => msg.content && setViewingImage(msg.content)} className="w-full h-auto object-cover max-h-[600px] cursor-zoom-in" />
                     {msg.tags && msg.tags.length > 0 && (
                       <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
                         {msg.tags.map(tag => (
@@ -222,6 +373,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <svg className="w-5 h-5 text-violet-500 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest group-hover:text-violet-400">{t.story}</span>
              </button>
+
+             <button type="button" onClick={onToggleVoice} className={`group flex items-center gap-3 px-5 py-2.5 border rounded-2xl transition-all ${isVoiceEnabled ? 'bg-white/10 hover:bg-white/20 border-white/20' : 'bg-black/40 hover:bg-white/5 border-white/5 opacity-50 hover:opacity-100'}`}>
+                {isVoiceEnabled ? (
+                  <svg className="w-5 h-5 text-green-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 19L5 13H2V7h3l6-6v18z" /></svg>
+                ) : (
+                  <svg className="w-5 h-5 text-slate-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h2.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+                )}
+                <span className={`text-[10px] font-black uppercase tracking-widest ${isVoiceEnabled ? 'text-green-400' : 'text-slate-400'}`}>Voice</span>
+             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="relative group/input">
@@ -234,8 +394,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 placeholder={currentMode === 'scenario' ? t.placeholder_scenario : t.placeholder_msg}
                 className="flex-1 bg-transparent border-none py-5 px-6 focus:ring-0 outline-none text-white text-lg placeholder:text-slate-600"
               />
+              
+              <button
+                type="button"
+                onClick={toggleRecording}
+                className={`w-14 h-14 mr-2 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-90 ${isRecording ? 'bg-red-500 animate-pulse text-white' : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'}`}
+                title="Voice Input"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+              </button>
               <button
                 type="submit"
+
                 disabled={!input.trim() || isTyping}
                 className={`w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-90 disabled:opacity-50 ${currentMode === 'scenario' ? 'bg-violet-600 hover:bg-violet-500' : 'bg-pink-600 hover:bg-pink-500'}`}
               >
